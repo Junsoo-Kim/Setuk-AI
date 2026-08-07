@@ -13,6 +13,20 @@
 
 기획, 개발, 테스트, 규칙 수정, 예시 설명 요청에는 파이프라인을 실행하지 않는다. 식별자가 없거나 둘 이상으로 해석되면 작업을 시작하지 말고 하나의 입력 파일을 지정해 달라고 요청한다.
 
+## UTF-8 파일 입출력
+
+한글 파일을 처음부터 정확히 읽는다. PowerShell에서 텍스트를 읽기 전에 다음 인코딩을 설정하고, 모든 `Get-Content` 호출에 `-Encoding UTF8`을 명시한다.
+
+```powershell
+$OutputEncoding = [System.Text.UTF8Encoding]::new()
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+Get-Content -Raw -Encoding UTF8 -LiteralPath '<파일경로>'
+```
+
+- 기본 인코딩으로 먼저 읽은 뒤 깨지면 재시도하는 방식을 사용하지 않는다.
+- YAML과 Markdown은 UTF-8로 저장한다. 가능하면 BOM 없이 저장한다.
+- `Get-Item.Length`는 디스크 파일 크기일 뿐 NEIS 바이트 수가 아니다. Linter 실행 전에는 이를 NEIS 기준 바이트로 보고하지 않는다.
+
 ## 보호해야 하는 경계
 
 - 한 작업에서는 지정된 학생 보고서 하나와 학생 YAML 하나만 읽는다.
@@ -35,6 +49,7 @@
 - 결과가 `REPORT_NEEDS_INPUT_V1`이면 즉시 중단하고 질문만 사용자에게 전달한다.
 - 결과가 `REPORT_INGESTED_V1`이면 계약의 `yaml_path`만 다음 단계 입력으로 사용한다.
 - 동일한 YAML이 이미 있으면 01단계 지침에 따라 덮어쓰기 승인을 받는다. 승인 전에는 기존 YAML을 읽거나 변경하지 않는다.
+- 보고서 후보가 없으면 현재 열려 있는 작업공간의 `보고서/` 절대 경로와 그 안의 DOCX 파일명만 확인한다. 새 버전 ZIP을 풀어 실행 중이라면 기존 개발 폴더의 보고서가 자동 복사되지 않음을 설명한다.
 
 ### B. 기존 YAML 직접 입력 모드
 

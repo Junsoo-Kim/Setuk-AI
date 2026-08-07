@@ -64,6 +64,23 @@ class AgentInstructionTests(unittest.TestCase):
         self.assertIn("실패하거나 결과를 얻지 못한 실험", self.ingestion)
         self.assertIn("교사의 직접 관찰로 바꾸지 않는다", self.ingestion)
 
+    def test_localized_report_typos_warn_without_blocking(self):
+        self.assertIn("비차단 불일치", self.ingestion)
+        self.assertIn("자동으로 고쳐 쓰지 않는다", self.ingestion)
+        self.assertIn("REPORT_INGESTED_V1.warnings", self.ingestion)
+        self.assertIn("excluded_uncertain_facts", self.ingestion)
+        self.assertIn("해당 무늬 길이는 제외", self.ingestion)
+
+    def test_blocking_report_conflicts_are_limited_to_core_facts(self):
+        self.assertIn("차단 불일치", self.ingestion)
+        self.assertIn("학생 신원을 확정할 수 없음", self.ingestion)
+        self.assertIn("불확실한 부분만 제외하고 진행할 수 없음", self.ingestion)
+
+    def test_missing_report_response_identifies_active_workspace(self):
+        self.assertIn("active_report_directory", self.ingestion)
+        self.assertIn("available_docx_filenames", self.ingestion)
+        self.assertIn("새 버전 ZIP", (ROOT / "보고서" / "README.md").read_text(encoding="utf-8"))
+
     def test_teacher_evaluation_is_required_and_evidence_based(self):
         self.assertIn("평가 문장 또는 절을 최소 1개", self.drafting)
         self.assertIn("teacher_evaluation", self.drafting)

@@ -62,6 +62,12 @@ class MasterRuleTests(unittest.TestCase):
         self.assertIn("기존 YAML 직접 입력 모드", self.master)
         self.assertIn("경로를 명시한 경우에만", self.master)
 
+    def test_utf8_is_required_before_first_text_read(self):
+        self.assertIn("UTF-8 파일 입출력", self.master)
+        self.assertIn("-Encoding UTF8", self.master)
+        self.assertIn("깨지면 재시도", self.master)
+        self.assertIn("NEIS 기준 바이트로 보고하지 않는다", self.master)
+
 
 if __name__ == "__main__":
     unittest.main()
