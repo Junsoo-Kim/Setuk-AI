@@ -1,0 +1,17 @@
+# 학생별 실제 입력 데이터는 개인정보를 포함할 수 있으므로 추적하지 않습니다.
+학생정보/*.yaml
+!학생정보/template.yaml
+!학생정보/example.yaml
+
+# AI가 생성한 학생별 결과물은 로컬에만 보관합니다.
+세특/*.md
+!세특/README.md
+
+# Python 실행 중 생성되는 임시 파일
+__pycache__/
+*.py[cod]
+
+# 편집기 및 운영체제 임시 파일
+.vscode/
+.DS_Store
+Thumbs.db

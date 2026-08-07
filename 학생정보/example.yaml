@@ -1,0 +1,40 @@
+# 입력 형식을 설명하기 위한 가상 학생 데이터입니다.
+schema_version: 1
+
+student:
+  name: "김준수"
+  grade: "2"
+  class: "3"
+  number: "12"
+
+subject:
+  name: "물리학Ⅰ"
+  semester: "1학기"
+  teacher: "이교사"
+
+activities:
+  - topic: "진자의 길이와 주기의 관계 탐구"
+    motivation: "진자의 질량이 달라지면 주기도 달라질 것이라는 초기 가설을 검증하고자 함"
+    process:
+      - "진자의 길이를 20 cm, 40 cm, 60 cm로 바꾸어 각각 10회 왕복 시간을 측정함"
+      - "질량은 달리하고 길이는 같게 유지한 대조 실험을 수행함"
+      - "측정값을 표와 그래프로 정리하고 평균 주기를 계산함"
+    evidence:
+      - "길이가 길어질수록 측정한 주기가 증가함"
+      - "같은 길이에서는 질량 변화에 따른 주기 차이가 측정 오차 범위에 머묾"
+    result: "초기 가설을 수정하고 진자의 주기가 길이와 관련된다는 결론을 도출함"
+    competencies:
+      - "변인 통제"
+      - "자료 해석"
+      - "과학적 의사소통"
+    growth: "예상과 다른 결과를 실패로 보지 않고 실험 설계를 재검토하는 태도를 보임"
+    teacher_observation: "측정 오차의 원인을 반응 시간과 진폭 차이로 구분하여 설명함"
+
+overall_observation: "관찰 결과를 근거로 자신의 가설을 수정하며 탐구를 끝까지 수행함"
+
+requirements:
+  target_bytes: null
+  emphasis:
+    - "변인 통제 과정"
+    - "가설을 수정한 태도"
+  exclude: []
