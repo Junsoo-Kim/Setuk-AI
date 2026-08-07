@@ -12,17 +12,20 @@ class ReleaseLayoutTests(unittest.TestCase):
     def test_required_release_sources_exist(self):
         required = [
             "AGENTS.md",
-            ".agent/01_data_structuring.md",
-            ".agent/02_drafting.md",
-            ".agent/03_evaluation.md",
+            ".agent/01_report_ingestion.md",
+            ".agent/02_data_structuring.md",
+            ".agent/03_drafting.md",
+            ".agent/04_evaluation.md",
             ".clinerules/00-setuk-master.md",
             ".clinerules/workflows/setuk.md",
             "학생정보/template.yaml",
+            "보고서/README.md",
             "세특/README.md",
             "python_portable/python.exe",
             "python_portable/_socket.pyd",
             "python_portable/LICENSE.txt",
             "linter.py",
+            "scripts/extract_docx.py",
             "rules.json",
             "사용안내.md",
             "THIRD_PARTY_NOTICES.md",
@@ -66,6 +69,13 @@ class ReleaseLayoutTests(unittest.TestCase):
         self.assertIn("'학생정보/template.yaml'", script)
         self.assertIn("'학생정보/example.yaml'", script)
         self.assertIn("'세특/README.md'", script)
+        self.assertNotIn("'보고서',", script)
+        self.assertIn("'보고서/README.md'", script)
+
+    def test_private_reports_are_ignored(self):
+        ignore_rules = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("보고서/*", ignore_rules)
+        self.assertIn("!보고서/README.md", ignore_rules)
 
     def test_zip_builder_uses_portable_entry_separators(self):
         with tempfile.TemporaryDirectory() as directory:

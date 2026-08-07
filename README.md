@@ -9,19 +9,22 @@
 - `학생정보/template.yaml`: 새 학생 파일을 만들 때 사용하는 원본 양식
 - `학생정보/example.yaml`: 입력 방법을 보여 주는 가상 학생 예시
 - `학생정보/README.md`: 항목별 작성 원칙과 주의사항
+- `보고서/`: 학생별 DOCX 보고서를 넣는 로컬 입력 폴더
 - `세특/`: 이후 AI가 완성한 세특 문서를 저장할 위치
 - `linter.py`: 세특 결과물의 분량·금칙어·허용 문자를 검사하는 도구
 - `rules.json`: 학교와 학년도에 맞게 수정할 수 있는 검사 규칙
-- `.agent/01_data_structuring.md`: YAML을 근거 추적이 가능한 명제로 구조화하는 지침
-- `.agent/02_drafting.md`: 학습 동기·탐구 활동·역량 및 성장 구조의 초안 작성 지침
-- `.agent/03_evaluation.md`: 사실 보존 여부와 내용의 깊이를 평가하고 최종 파일을 저장하는 지침
+- `.agent/01_report_ingestion.md`: DOCX 보고서를 읽고 학생 YAML을 생성하는 지침
+- `.agent/02_data_structuring.md`: YAML을 근거 추적이 가능한 명제로 구조화하는 지침
+- `.agent/03_drafting.md`: 학습 동기·탐구 활동·역량 및 성장 구조의 초안 작성 지침
+- `.agent/04_evaluation.md`: 사실 보존 여부와 내용의 깊이를 평가하고 최종 파일을 저장하는 지침
+- `scripts/extract_docx.py`: DOCX 문단과 표를 UTF-8 JSON으로 추출하는 도구
 - `AGENTS.md`: Codex와 Cline이 공통으로 사용하는 전체 실행·승인·수정 규칙
 - `.clinerules/00-setuk-master.md`: Cline 전용 보완 규칙
 - `.clinerules/workflows/setuk.md`: Cline에서 선택적으로 호출할 수 있는 세특 작성 워크플로
 - `사용안내.md`: 설치부터 NEIS 복사까지 설명한 교사용 안내서
 - `scripts/build_release.ps1`: 테스트·연기 검사 후 ZIP을 만드는 배포 스크립트
 
-세 AI 지침은 `STRUCTURED_FACTS_V1 → DRAFT_V1 → EVALUATED_RESULT_V1` 계약으로 연결됩니다. 입력 근거가 부족하면 `NEEDS_INPUT_V1`으로 중단하여 AI가 빈 내용을 추측해 채우지 않도록 설계했습니다.
+네 AI 지침은 `REPORT_INGESTED_V1 → STRUCTURED_FACTS_V1 → DRAFT_V1 → EVALUATED_RESULT_V1` 계약으로 연결됩니다. 보고서나 입력 근거가 부족하면 `REPORT_NEEDS_INPUT_V1` 또는 `NEEDS_INPUT_V1`으로 중단하여 AI가 빈 내용을 추측해 채우지 않도록 설계했습니다.
 
 ## AI 파이프라인 실행 방법
 
@@ -31,13 +34,19 @@ VSCode에서 프로젝트 폴더를 열고 Codex 또는 Cline의 새 채팅에 �
 김준수 세특 작업 시작해
 ```
 
-이 경우 `학생정보/김준수.yaml`이 정확히 존재해야 합니다. 파일명이 학생 이름이 아니라 내부 식별번호라면 다음처럼 정확한 경로를 지정합니다.
+이 경우 AI는 `보고서/`에서 파일명에 `김준수`가 포함된 DOCX 하나를 찾아 `학생정보/김준수.yaml`을 먼저 생성합니다. 기존 YAML이 있으면 덮어쓰기 승인을 요청합니다. 보고서 경로를 직접 지정할 수도 있습니다.
+
+```text
+보고서/김준수_물리학Ⅱ_주제탐구보고서.docx로 세특 작성해
+```
+
+이미 작성·검토한 YAML을 그대로 사용하여 보고서 입력 단계를 생략하려면 다음처럼 정확한 YAML 경로를 지정합니다.
 
 ```text
 학생정보/2026-2-03-12.yaml로 세특 작성해
 ```
 
-AI는 3개 지침을 순서대로 실행하고 최종 파일을 저장한 뒤 Linter 명령을 보여 줍니다. 사용자가 명시적으로 승인해야 검사가 실행되며, 오류 수정 후 재검사할 때도 다시 승인을 요청합니다.
+AI는 보고서 입력을 포함한 4개 지침을 순서대로 실행하고 최종 파일을 저장한 뒤 Linter 명령을 보여 줍니다. 사용자가 명시적으로 승인해야 검사가 실행되며, 오류 수정 후 재검사할 때도 다시 승인을 요청합니다.
 
 Cline에서는 자연어 요청 외에 `/setuk.md` 워크플로를 선택적으로 사용할 수 있습니다. Codex의 현재 공식 프로젝트 지침 파일은 `.codexrules`가 아니라 `AGENTS.md`이므로 이 저장소도 해당 형식을 사용합니다. Cline 역시 `AGENTS.md`를 읽으며, Cline 전용 규칙은 `.clinerules/`에 보관합니다.
 
