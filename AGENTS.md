@@ -45,22 +45,11 @@
 
 ## 3. Linter 실행 파일 결정
 
-최종 파일 저장 후 아래 순서로 Python 실행 파일을 찾는다.
-
-1. `python_portable/python.exe`가 있으면 사용한다.
-2. 없으면 저장소 루트에서 `python-*-embed-amd64/python.exe`와 일치하는 파일을 찾는다.
-3. 두 번째 후보가 정확히 하나일 때만 사용한다.
-4. 후보가 없거나 둘 이상이면 실행하지 말고 포터블 Python 경로를 사용자에게 요청한다.
+최종 파일 저장 후 `python_portable/python.exe`를 사용한다. 파일이 없으면 시스템 Python으로 대체하지 말고 포터블 Python이 누락되었다고 사용자에게 보고한다.
 
 시스템 PATH의 `python`, `python3`, `py`는 사용하지 않는다. 학생 파일과 규칙 파일 경로는 항상 별도 인자로 안전하게 전달하며 문자열로 조합한 동적 셸 명령을 만들지 않는다.
 
-현재 저장소 구조에서 예상되는 명령 형식은 다음과 같다.
-
-```powershell
-& '.\python-3.13.15-embed-amd64\python.exe' '.\linter.py' '.\세특\<식별자>.md' '--json'
-```
-
-배포용 디렉터리로 변경된 경우에는 다음 형식을 사용한다.
+명령 형식은 다음과 같다.
 
 ```powershell
 & '.\python_portable\python.exe' '.\linter.py' '.\세특\<식별자>.md' '--json'
@@ -120,5 +109,5 @@ Linter 통과는 내용의 사실성이나 최신 학교생활기록부 지침 �
 이 저장소의 Python 코드나 규칙 파일을 변경했다면 포터블 Python으로 전체 테스트를 실행한다.
 
 ```powershell
-& '.\python-3.13.15-embed-amd64\python.exe' '-m' 'unittest' 'discover' '-s' 'tests' '-v'
+& '.\python_portable\python.exe' '-m' 'unittest' 'discover' '-s' 'tests' '-v'
 ```

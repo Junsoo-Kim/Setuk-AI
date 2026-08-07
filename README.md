@@ -2,7 +2,7 @@
 
 고등학교 교사의 세부능력 및 특기사항(세특) 작성을 돕는 로컬 VSCode 기반 AI 하네스입니다.
 
-현재 개발 상태는 **4단계 완료: Codex/Cline 마스터 규칙과 Linter 승인·자동 수정 흐름 연동**입니다.
+현재 개발 상태는 **5단계 완료: 포터블 Python 포함 배포 패키지 및 사용자 문서 구축**입니다.
 
 ## 현재 사용할 수 있는 것
 
@@ -18,6 +18,8 @@
 - `AGENTS.md`: Codex와 Cline이 공통으로 사용하는 전체 실행·승인·수정 규칙
 - `.clinerules/00-setuk-master.md`: Cline 전용 보완 규칙
 - `.clinerules/workflows/setuk.md`: Cline에서 선택적으로 호출할 수 있는 세특 작성 워크플로
+- `사용안내.md`: 설치부터 NEIS 복사까지 설명한 교사용 안내서
+- `scripts/build_release.ps1`: 테스트·연기 검사 후 ZIP을 만드는 배포 스크립트
 
 세 AI 지침은 `STRUCTURED_FACTS_V1 → DRAFT_V1 → EVALUATED_RESULT_V1` 계약으로 연결됩니다. 입력 근거가 부족하면 `NEEDS_INPUT_V1`으로 중단하여 AI가 빈 내용을 추측해 채우지 않도록 설계했습니다.
 
@@ -53,19 +55,19 @@ Cline에서는 자연어 요청 외에 `/setuk.md` 워크플로를 선택적으�
 프로젝트 루트에서 다음 명령을 실행합니다.
 
 ```powershell
-.\python-3.13.15-embed-amd64\python.exe linter.py "세특\학생파일.md"
+.\python_portable\python.exe linter.py "세특\학생파일.md"
 ```
 
 AI가 결과를 구조적으로 읽어야 할 때는 JSON 출력을 사용할 수 있습니다.
 
 ```powershell
-.\python-3.13.15-embed-amd64\python.exe linter.py "세특\학생파일.md" --json
+.\python_portable\python.exe linter.py "세특\학생파일.md" --json
 ```
 
 특정 과목이나 학교 기준에 맞춰 최대 분량만 일시적으로 바꾸려면 다음과 같이 실행합니다.
 
 ```powershell
-.\python-3.13.15-embed-amd64\python.exe linter.py "세특\학생파일.md" --max-bytes 1200
+.\python_portable\python.exe linter.py "세특\학생파일.md" --max-bytes 1200
 ```
 
 종료 코드는 `0`이면 통과, `1`이면 내용 규칙 위반, `2`이면 파일 또는 설정 오류를 의미합니다. 기본 분량은 `rules.json`의 1,500바이트이며 ASCII 1바이트, 비ASCII 3바이트, 줄바꿈 2바이트로 계산합니다. 실제 허용 분량과 기재 제한은 과목·학년·학년도에 따라 달라질 수 있으므로 해당 연도의 학교생활기록부 기재요령에 맞춰 `rules.json`을 확인해야 합니다.
@@ -75,7 +77,15 @@ AI가 결과를 구조적으로 읽어야 할 때는 JSON 출력을 사용할 �
 외부 패키지 없이 포터블 Python으로 실행됩니다.
 
 ```powershell
-.\python-3.13.15-embed-amd64\python.exe -m unittest discover -s tests -v
+.\python_portable\python.exe -m unittest discover -s tests -v
+```
+
+## 배포 ZIP 만들기
+
+프로젝트 루트에서 다음 명령을 실행하면 전체 테스트와 배포본 연기 검사를 거쳐 `dist/Setuk-Harness-<버전>.zip`을 만듭니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1
 ```
 
 ## 예정된 개발 단계
@@ -84,6 +94,6 @@ AI가 결과를 구조적으로 읽어야 할 때는 JSON 출력을 사용할 �
 2. NEIS 기준 정적 분석 Linter 및 자동 테스트 개발 — 완료
 3. 전처리·초안 작성·평가 AI 지침 개발 — 완료
 4. Codex/Cline 마스터 규칙과 자동 수정 흐름 연동 — 완료
-5. 포터블 Python 포함 배포 패키지 및 사용자 문서 완성
+5. 포터블 Python 포함 배포 패키지 및 사용자 문서 완성 — 완료
 
 자세한 목표와 전체 흐름은 `기획서.md`에서 확인할 수 있습니다.

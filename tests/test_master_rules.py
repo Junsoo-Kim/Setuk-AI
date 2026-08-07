@@ -35,7 +35,6 @@ class MasterRuleTests(unittest.TestCase):
 
     def test_only_portable_python_is_allowed(self):
         self.assertIn("python_portable/python.exe", self.master)
-        self.assertIn("python-*-embed-amd64/python.exe", self.master)
         self.assertIn("시스템 PATH의 `python`, `python3`, `py`는 사용하지 않는다", self.master)
 
     def test_every_linter_run_requires_approval(self):
