@@ -1,0 +1,358 @@
+{
+  "meta": {
+    "version": "0.1.0",
+    "source": "2026학년도 학교생활기록부 기재요령 (교육부/17개 시도교육청 공통 발췌 - 사용자 제공본)",
+    "last_updated": "2026-08-12",
+    "disclaimer": "이 파일은 사용자가 제공한 기재요령 발췌본(항목 1~8)과 학생부 종합지원센터(star.moe.go.kr) 공식 Q&A를 근거로 작성되었습니다. 세특(교과별/개인별)·자율활동·동아리활동은 500자(1,500byte)를 표준 기준으로 사용합니다. 진로활동/행동특성은 2026학년도에 글자수가 축소된 것으로 확인되나 정확한 수치는 아직 파악되지 않았습니다(아래 해당 필드 참고). 이 rules.json은 기계적 1차 필터일 뿐이며, 최종 기재 책임은 항상 교사에게 있습니다(원문 5항).",
+    "encoding_note": "NEIS 바이트 계산 기준: 한글 1자=3byte, 영문/숫자/기호/공백=1byte, 줄바꿈(엔터)=2byte. EUC-KR 방식과 다르므로 반드시 이 기준으로 계산할 것."
+  },
+  "length_limits": {
+    "verified": true,
+    "note": "세특(교과별/개인별)·자율활동·동아리활동은 500자(1,500byte)가 표준 기준. 진로활동/행동특성은 2026학년도 축소분 반영 필요(해당 필드의 note 참고).",
+    "fields": {
+      "subject_setuk": {
+        "label": "교과학습발달상황 - 세부능력 및 특기사항(과목별)",
+        "max_bytes": 1500,
+        "max_chars_ko_equiv": 500,
+        "note": "공통과목(국어/수학/영어/한국사/통합사회/통합과학 등 1학년 필수 과목)은 예외 — 공통과목1·2 합산 500자(1500byte)가 기준이며, 과목당 각 1500byte가 아님. 물리학Ⅱ 등 선택과목은 이 예외 대상이 아니며 1500byte가 그대로 적용됨."
+      },
+      "individual_setuk": {
+        "label": "개인별 세부능력 및 특기사항(학년 단위 총합)",
+        "max_bytes": 1500,
+        "max_chars_ko_equiv": 500
+      },
+      "autonomous_activity": {
+        "label": "자율활동 특기사항",
+        "max_bytes": 1500,
+        "max_chars_ko_equiv": 500
+      },
+      "club_activity": {
+        "label": "동아리활동 특기사항",
+        "max_bytes": 1500,
+        "max_chars_ko_equiv": 500
+      },
+      "career_activity": {
+        "label": "진로활동 특기사항",
+        "max_bytes": null,
+        "max_chars_ko_equiv": null,
+        "note": "2026학년도 축소 대상으로 보도됨. 정확한 수치 미확인 - 반드시 확인 필요."
+      },
+      "behavior_comment": {
+        "label": "행동특성 및 종합의견",
+        "max_bytes": null,
+        "max_chars_ko_equiv": null,
+        "note": "2026학년도 축소 대상으로 보도됨. 정확한 수치 미확인 - 반드시 확인 필요."
+      }
+    }
+  },
+  "forbidden_keywords": {
+    "description": "원문 3항(가~파) 및 4항 기반. severity=block: 예외 없이 발견 즉시 수정 요구. severity=review: 문맥에 따라 정상 사용일 수 있어 사람 검토 플래그만 띄움.",
+    "categories": [
+      {
+        "id": "language_test",
+        "label": "공인어학/한자 시험 성적·참여·수상",
+        "basis": "3항-가",
+        "severity": "block",
+        "keywords": [
+          "TOEIC",
+          "토익",
+          "TOEFL",
+          "토플",
+          "TEPS",
+          "텝스",
+          "HSK",
+          "JPT",
+          "JLPT",
+          "DELF",
+          "DALF",
+          "ZD",
+          "TESTDAF",
+          "TestDaF",
+          "DSH",
+          "DSD",
+          "TORFL",
+          "DELE",
+          "상공회의소한자시험",
+          "한자능력검정",
+          "실용한자",
+          "한자급수자격검정",
+          "YBM 상무한검",
+          "한자급수인증시험",
+          "한자자격검정"
+        ]
+      },
+      {
+        "id": "contest_award",
+        "label": "교내외 대회 참여/성적/수상 실적",
+        "basis": "3항-나, 3항-다",
+        "severity": "review",
+        "note": "교내대회는 '수상경력' 항목에만 입력 가능, 세특에는 어떤 형태로도 기재 불가. 교외대회/교외상은 전 항목 기재 불가.",
+        "keywords": [
+          "대회",
+          "경진대회",
+          "콘테스트",
+          "올림피아드",
+          "수상",
+          "입상",
+          "우승",
+          "준우승",
+          "대상",
+          "금상",
+          "은상",
+          "동상",
+          "장려상",
+          "최우수상",
+          "우수상",
+          "특별상",
+          "표창장",
+          "감사장",
+          "공로상"
+        ]
+      },
+      {
+        "id": "certification_exam",
+        "label": "교내외 인증시험 참여/성적, 자격증 명칭·취득",
+        "basis": "3항-라, 3항-파",
+        "severity": "review",
+        "note": "'자격증 취득 및 국가직무능력표준 이수상황' 항목 외에는 자격증명 자체도 기재 불가.",
+        "keywords": [
+          "인증시험",
+          "인증평가",
+          "자격증",
+          "자격 취득",
+          "자격취득",
+          "급수 인증",
+          "검정시험",
+          "컴퓨터활용능력",
+          "정보처리기사",
+          "워드프로세서",
+          "ITQ",
+          "GTQ",
+          "한국사능력검정시험",
+          "한능검",
+          "TOPCIT",
+          "전산회계",
+          "바리스타 자격증",
+          "조리기능사"
+        ]
+      },
+      {
+        "id": "mock_exam_score",
+        "label": "모의고사·전국연합학력평가 성적",
+        "basis": "3항-마",
+        "severity": "block",
+        "keywords": [
+          "모의고사",
+          "전국연합학력평가",
+          "학력평가",
+          "원점수",
+          "석차등급",
+          "석차",
+          "백분위",
+          "등급컷",
+          "표준점수"
+        ]
+      },
+      {
+        "id": "paper_publication",
+        "label": "논문 투고/게재, 학회 발표",
+        "basis": "3항-바",
+        "severity": "review",
+        "keywords": [
+          "논문",
+          "학회지",
+          "학회",
+          "게재",
+          "투고",
+          "학술지"
+        ]
+      },
+      {
+        "id": "book_publication",
+        "label": "도서출간 사실",
+        "basis": "3항-사",
+        "severity": "review",
+        "keywords": [
+          "출간",
+          "저서",
+          "도서 출판",
+          "책을 출판",
+          "출판사"
+        ]
+      },
+      {
+        "id": "ip_rights",
+        "label": "지식재산권 출원/등록",
+        "basis": "3항-아",
+        "severity": "block",
+        "keywords": [
+          "특허",
+          "실용신안",
+          "상표권",
+          "디자인등록",
+          "지식재산권",
+          "특허출원",
+          "상표출원"
+        ]
+      },
+      {
+        "id": "overseas_activity",
+        "label": "해외 활동 실적(어학연수, 해외봉사 등)",
+        "basis": "3항-자",
+        "severity": "review",
+        "keywords": [
+          "어학연수",
+          "해외봉사",
+          "해외 봉사활동",
+          "해외 인턴십",
+          "교환학생"
+        ]
+      },
+      {
+        "id": "scholarship",
+        "label": "장학생/장학금",
+        "basis": "3항-카",
+        "severity": "block",
+        "keywords": [
+          "장학생",
+          "장학금",
+          "장학 재단",
+          "장학재단"
+        ]
+      },
+      {
+        "id": "ai_disclosure",
+        "label": "생성형 AI 활용 사실의 명시적 노출",
+        "basis": "5항-다",
+        "severity": "block",
+        "note": "AI 활용 자체가 아니라, 그 사실이 문장에 드러나는 것을 차단. 별도로 harness_specific.ai_residue_patterns도 함께 확인할 것.",
+        "keywords": [
+          "챗GPT",
+          "ChatGPT",
+          "GPT-4",
+          "GPT4",
+          "지피티",
+          "제미나이",
+          "Gemini",
+          "Claude",
+          "클로드",
+          "AI가 작성",
+          "인공지능이 생성",
+          "AI를 활용하여 작성"
+        ]
+      }
+    ]
+  },
+  "combination_flags": {
+    "description": "단일 키워드만으로는 오탐이 많아, 두 리스트의 근접 co-occurrence(같은 문장 또는 ±20자 이내)로 판단해야 하는 항목. linter.py 쪽 로직에서 사용.",
+    "rules": [
+      {
+        "id": "parent_occupation_hint",
+        "label": "부모(친인척 포함) 사회·경제적 지위 암시",
+        "basis": "3항-차",
+        "severity": "review",
+        "list_a_family_terms": [
+          "아버지",
+          "어머니",
+          "부모",
+          "부모님",
+          "삼촌",
+          "이모",
+          "고모",
+          "형",
+          "누나",
+          "언니",
+          "오빠",
+          "가족"
+        ],
+        "list_b_occupation_terms": [
+          "의사",
+          "변호사",
+          "판사",
+          "검사",
+          "교수",
+          "공무원",
+          "회사원",
+          "대표",
+          "사장",
+          "부장",
+          "팀장",
+          "임원",
+          "CEO",
+          "임용",
+          "개업"
+        ]
+      }
+    ]
+  },
+  "regex_patterns": {
+    "description": "특정 명칭류는 리스트로 다 못 채우므로 패턴 기반으로 잡고 review 처리. 정규식은 Python re 모듈 기준.",
+    "patterns": [
+      {
+        "id": "university_name",
+        "label": "구체적 대학명 언급 가능성",
+        "basis": "3항-타",
+        "severity": "review",
+        "pattern": "[가-힣]{2,8}(대학교|대학원)",
+        "note": "교육관련기관(교육부/시도교육청 및 소속·직속기관)은 예외적으로 기재 가능(원문 각주1). 예외 목록은 별도 화이트리스트로 관리 필요."
+      },
+      {
+        "id": "school_identifying_name",
+        "label": "재학 고교를 특정할 수 있는 명칭(학교명/재단명/축제명 등)",
+        "basis": "4항",
+        "severity": "review",
+        "pattern": "[가-힣]{2,10}(고등학교|고교|재단)",
+        "note": "인적·학적사항, 수상경력의 수여기관, 봉사활동 장소/주관기관명은 예외."
+      },
+      {
+        "id": "hagwon_brand_name",
+        "label": "사교육 상호명",
+        "basis": "3항-타",
+        "severity": "review",
+        "keywords_fallback": [
+          "메가스터디",
+          "이투스",
+          "스카이에듀",
+          "대성마이맥",
+          "종로학원",
+          "시대인재",
+          "휴넷",
+          "에스티유니타스"
+        ]
+      }
+    ]
+  },
+  "harness_specific": {
+    "description": "교육부 기재요령 조항은 아니지만, AI 하네스로 초안을 만드는 이 프로젝트 특성상 반드시 걸러야 하는 산출물 오염 패턴.",
+    "ai_residue_patterns": {
+      "label": "LLM 메타발화/잔재 표현 - 초안에 섞이면 안 되는 문장",
+      "severity": "block",
+      "keywords": [
+        "다음과 같이 작성하겠습니다",
+        "물론입니다",
+        "알겠습니다",
+        "죄송합니다",
+        "다음은",
+        "이 세특은",
+        "요청하신",
+        "제공된 내용에 따르면",
+        "As an AI",
+        "As a language model",
+        "저는 AI",
+        "위 내용을 바탕으로",
+        "다시 작성해드리겠습니다"
+      ]
+    },
+    "vague_praise_only": {
+      "label": "구체성 없는 상투적 문구 단독 사용 (정량화된 근거 없이 이 표현들로만 문단이 끝나는 경우)",
+      "severity": "warning",
+      "note": "원문 규정은 아니지만 입학사정관 관점에서 변별력이 떨어진다는 지적(2026 기재요령 해설 칼럼 다수). 03_evaluation.md에서 정성 평가 시 참고용으로만 사용, 자동 block 금지.",
+      "keywords": [
+        "매사에 성실함",
+        "학업에 대한 열정이 남다름",
+        "적극적인 태도로 참여함",
+        "우수한 성취를 보임"
+      ]
+    }
+  }
+}
