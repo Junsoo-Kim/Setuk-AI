@@ -8,7 +8,7 @@
 
 - `STRUCTURED_FACTS_V1`: 변경할 수 없는 사실 장부
 - `DRAFT_V1`: 평가하고 수정할 초안
-- `rules.json`: 분량·금칙어·허용 문자 기준
+- `rules.json`: 목표 하한·최대 분량·금칙어·허용 문자 기준
 
 두 계약의 `source_path`와 `output_path`가 서로 다르면 즉시 중단하고 학생정보 혼선 오류를 보고한다.
 
@@ -35,6 +35,15 @@
 5. 동기→탐구→역량 및 성장의 연결 개선
 6. 중복과 상투적 수식어 제거
 7. 목표 분량 조정
+
+## 목표 분량 보강
+
+- `constraints.target_bytes`가 목표 하한보다 작은 경우를 제외하면 최종 본문을 `rules.json.target_min_bytes` 이상, 적용 상한 이하로 맞춘다.
+- 목표 범위 안에서는 중복 없이 추가할 수 있는 근거가 있는 한 적용 상한에 최대한 가깝게 다듬는다. 단, 상한에 맞추기 위해 조사·실험·관찰·수치·평가를 창작하지 않는다.
+- 목표 하한 미만이면 먼저 `omitted_proposition_ids`와 사용한 명제의 세부 근거를 다시 검토하고 다음 순서로 보강한다: 방법과 조건, 판단 근거와 결과 해석, 오차·한계와 재시도, 개념 변화, 행동에 근거한 교사 평가.
+- 보강 문장마다 `STRUCTURED_FACTS_V1`의 명제 ID로 추적 가능한지 확인한다. 같은 사실이나 동일 역량의 표현만 바꾼 문장은 보강으로 인정하지 않는다.
+- 사용 가능한 근거를 모두 반영해도 목표 하한에 못 미치면 사실 충실성을 우선한다. 이때 저장은 허용하되 `EVALUATED_RESULT_V1.length_exception_reason`에 부족한 근거의 종류와 임의 확장을 하지 않은 이유를 기록한다.
+- 바이트 수는 `rules.json.byte_count` 방식으로 산정한다. UTF-8 파일 크기인 `Get-Item.Length`를 대신 사용하지 않는다.
 
 ## 나열형 문장 판정과 보완
 
@@ -63,6 +72,7 @@
 - 파일 경로는 계약의 `output_path`를 그대로 사용한다. 임의로 학생 이름을 추출하여 파일명을 바꾸지 않는다.
 - UTF-8로 저장한다.
 - `constraints.target_bytes`가 있으면 그 값을, 없으면 `rules.json.max_bytes`를 상한으로 사용한다.
+- 별도 상한이 `rules.json.target_min_bytes`보다 작지 않다면 목표 하한도 함께 적용한다.
 - 파일 저장 전 육안으로 확인 가능한 금칙어와 허용되지 않은 문자를 제거한다.
 - 이 단계에서는 Linter를 실행하지 않는다. 실행 승인과 반복 수정은 마스터 규칙의 책임이다.
 
@@ -77,6 +87,7 @@
 - 학생 식별정보와 Markdown 장식이 없음
 - 제외 조건을 위반하지 않음
 - 설정된 최대 분량을 넘지 않을 것으로 판단됨
+- 목표 하한 이상이거나, 근거 부족으로 인한 `length_exception_reason`이 기록됨
 
 조건을 만족하지 못하면 파일을 저장하지 않고 부족한 근거 또는 충돌한 계약을 보고한다. 저장 후에는 저장 경로와 사용한 명제 ID만 보고하며, 채팅에 학생정보 YAML 전체를 반복 출력하지 않는다.
 
@@ -88,6 +99,9 @@ source_path: "학생정보/<식별자>.yaml"
 output_path: "세특/<식별자>.md"
 saved: true
 used_proposition_ids: ["A1-P1", "A1-P2"]
+byte_count: 1450
+target_byte_range: [1400, 1500]
+length_exception_reason: null
 review:
   factual_fidelity: satisfied
   specificity: satisfied

@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "max_bytes": 1500,
+  "target_min_bytes": 1400,
   "byte_count": {
     "ascii": 1,
     "non_ascii": 3,

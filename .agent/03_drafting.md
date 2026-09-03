@@ -7,7 +7,7 @@
 ## 입력
 
 - 직전 단계의 `STRUCTURED_FACTS_V1`
-- `rules.json`의 `max_bytes`와 금칙어 설정
+- `rules.json`의 `target_min_bytes`, `max_bytes`와 금칙어 설정
 
 입력 계약이 `NEEDS_INPUT_V1`이거나 `STRUCTURED_FACTS_V1`이 아니면 작성하지 않는다.
 
@@ -60,7 +60,10 @@
 
 - `constraints.target_bytes`가 1 이상의 정수이면 이를 상한으로 사용한다.
 - 값이 없으면 `rules.json.max_bytes`를 상한으로 사용한다.
-- 평가 단계의 수정 여유를 위해 상한의 약 85~95%를 목표로 하되, 내용이 부족하면 분량을 채우려고 반복하거나 추측하지 않는다.
+- 상한이 `rules.json.max_bytes`와 같거나 더 크면 `rules.json.target_min_bytes`를 목표 하한으로 사용한다. 별도 상한이 목표 하한보다 작으면 별도 상한을 우선하며 목표 하한을 적용하지 않는다.
+- 초안은 평가 단계의 수정 여유를 남기되 목표 하한에 근접하도록 작성한다. 최종본은 목표 하한 이상, 상한 이하에서 가능한 한 상한에 가깝게 다듬는다.
+- 분량이 부족하면 아직 사용하지 않은 근거 명제를 다음 순서로 보강한다: 구체적 탐구 행동과 방법, 결과를 해석한 근거, 오차·한계의 인식과 보완, 행동에 근거한 교사 평가, 개념이나 방법의 변화.
+- 같은 활동이나 역량을 다른 말로 반복하거나 사실 장부에 없는 내용을 추가해서는 안 된다. 사용할 근거가 부족하면 억지로 목표 하한을 채우지 않고 `length_exception_reason`에 이유를 기록한다.
 - 바이트를 줄일 때는 근거 없는 수식어, 중복 표현, 덜 중요한 활동 순서로 제거한다.
 
 ## 출력 계약: `DRAFT_V1`
@@ -71,6 +74,9 @@ source_path: "학생정보/<식별자>.yaml"
 output_path: "세특/<식별자>.md"
 used_proposition_ids: ["A1-P1", "A1-P2"]
 omitted_proposition_ids: []
+target_byte_range: [1400, 1500]
+estimated_byte_count: 1450
+length_exception_reason: null
 teacher_evaluation:
   competency: ""
   support_ids: ["A1-P2"]
@@ -89,3 +95,4 @@ text: "마크다운 장식 없는 한 문단의 세특 초안"
 - 활동 요약과 구별되는 교사의 평가적 판단이 본문에 최소 1개 있는가?
 - 학생 식별정보와 Markdown 장식이 없는가?
 - 분량을 채우기 위한 반복이나 새로운 사실이 없는가?
+- 목표 하한 미만이라면 사용할 수 있는 근거 명제가 정말 남아 있지 않으며 `length_exception_reason`이 구체적인가?

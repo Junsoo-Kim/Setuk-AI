@@ -15,6 +15,7 @@ def make_rules(**overrides):
     rules = {
         "schema_version": 1,
         "max_bytes": 1500,
+        "target_min_bytes": 0,
         "byte_count": {"ascii": 1, "non_ascii": 3, "line_break": 2},
         "allowed_punctuation": ".,·'\"-()[]/%+=:;?!&",
         "allowed_symbols": "℃°±×÷",
@@ -42,6 +43,15 @@ class LintTests(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertIn("BYTE_LIMIT", [item.code for item in result.diagnostics])
 
+    def test_below_target_length_is_a_warning(self):
+        result = linter.lint_text(
+            "탐구함.", "student.md", make_rules(target_min_bytes=100)
+        )
+        self.assertTrue(result.passed)
+        self.assertEqual(result.warnings, 1)
+        self.assertIn("BELOW_TARGET_LENGTH", [item.code for item in result.diagnostics])
+        self.assertEqual(result.target_min_bytes, 100)
+
     def test_forbidden_term_is_case_insensitive(self):
         rules = make_rules(
             forbidden_terms=[{"term": "TOEIC", "reason": "기재 제한 여부 확인"}]
@@ -68,6 +78,15 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "rules.json"
             path.write_text(json.dumps(make_rules(max_bytes=0)), encoding="utf-8")
+            with self.assertRaises(linter.LinterError):
+                linter.load_rules(path)
+
+    def test_load_rules_rejects_target_min_above_max(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rules.json"
+            path.write_text(
+                json.dumps(make_rules(target_min_bytes=1501)), encoding="utf-8"
+            )
             with self.assertRaises(linter.LinterError):
                 linter.load_rules(path)
 

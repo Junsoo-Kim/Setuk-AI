@@ -68,6 +68,11 @@ class MasterRuleTests(unittest.TestCase):
         self.assertIn("깨지면 재시도", self.master)
         self.assertIn("NEIS 기준 바이트로 보고하지 않는다", self.master)
 
+    def test_below_target_length_triggers_evidence_based_revision(self):
+        self.assertIn("BELOW_TARGET_LENGTH", self.master)
+        self.assertIn("미사용 근거", self.master)
+        self.assertIn("length_exception_reason", self.master)
+
 
 if __name__ == "__main__":
     unittest.main()

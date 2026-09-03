@@ -94,6 +94,13 @@ class AgentInstructionTests(unittest.TestCase):
         self.assertIn("나열형 문장 판정과 보완", self.evaluation)
         self.assertIn("평가 문장 또는 절이 최소 1개 있음", self.evaluation)
 
+    def test_target_length_is_filled_only_with_supported_evidence(self):
+        self.assertIn("target_min_bytes", self.drafting)
+        self.assertIn("목표 하한 이상, 상한 이하", self.drafting)
+        self.assertIn("omitted_proposition_ids", self.evaluation)
+        self.assertIn("length_exception_reason", self.evaluation)
+        self.assertIn("Get-Item.Length", self.evaluation)
+
 
 if __name__ == "__main__":
     unittest.main()

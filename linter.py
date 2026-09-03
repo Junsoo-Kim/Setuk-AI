@@ -39,6 +39,7 @@ class Diagnostic:
 class LintResult:
     file: str
     byte_count: int
+    target_min_bytes: int
     max_bytes: int
     diagnostics: tuple[Diagnostic, ...]
 
@@ -59,6 +60,7 @@ class LintResult:
             "file": self.file,
             "passed": self.passed,
             "byte_count": self.byte_count,
+            "target_min_bytes": self.target_min_bytes,
             "max_bytes": self.max_bytes,
             "errors": self.errors,
             "warnings": self.warnings,
@@ -87,6 +89,15 @@ def load_rules(path: Path) -> dict[str, Any]:
     max_bytes = rules.get("max_bytes")
     if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes <= 0:
         raise LinterError("max_bytes는 1 이상의 정수여야 합니다.")
+
+    target_min_bytes = rules.get("target_min_bytes", 0)
+    if (
+        not isinstance(target_min_bytes, int)
+        or isinstance(target_min_bytes, bool)
+        or target_min_bytes < 0
+        or target_min_bytes > max_bytes
+    ):
+        raise LinterError("target_min_bytes는 0 이상 max_bytes 이하의 정수여야 합니다.")
 
     byte_rules = rules.get("byte_count")
     if not isinstance(byte_rules, dict):
@@ -148,6 +159,7 @@ def location(text: str, offset: int) -> tuple[int, int]:
 def lint_text(text: str, source: str, rules: dict[str, Any]) -> LintResult:
     diagnostics: list[Diagnostic] = []
     count = neis_byte_count(text, rules["byte_count"])
+    target_min_bytes = rules.get("target_min_bytes", 0)
     max_bytes = rules["max_bytes"]
 
     if not text.strip():
@@ -158,6 +170,14 @@ def lint_text(text: str, source: str, rules: dict[str, Any]) -> LintResult:
                 "error",
                 "BYTE_LIMIT",
                 f"NEIS 기준 분량이 {count}바이트로 최대 {max_bytes}바이트를 {count - max_bytes}바이트 초과했습니다.",
+            )
+        )
+    elif text.strip() and target_min_bytes and count < target_min_bytes:
+        diagnostics.append(
+            Diagnostic(
+                "warning",
+                "BELOW_TARGET_LENGTH",
+                f"NEIS 기준 분량이 {count}바이트로 권장 하한 {target_min_bytes}바이트보다 {target_min_bytes - count}바이트 부족합니다.",
             )
         )
 
@@ -221,14 +241,14 @@ def lint_text(text: str, source: str, rules: dict[str, Any]) -> LintResult:
             item.code,
         )
     )
-    return LintResult(source, count, max_bytes, tuple(diagnostics))
+    return LintResult(source, count, target_min_bytes, max_bytes, tuple(diagnostics))
 
 
 def format_text(result: LintResult) -> str:
     status = "통과" if result.passed else "실패"
     lines = [
         f"검사 결과: {status} (오류 {result.errors}건, 경고 {result.warnings}건)",
-        f"분량: {result.byte_count} / {result.max_bytes}바이트",
+        f"분량: {result.byte_count}바이트 (권장 {result.target_min_bytes}~{result.max_bytes}바이트)",
     ]
     for item in result.diagnostics:
         position = ""
@@ -255,7 +275,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.max_bytes is not None:
             if args.max_bytes <= 0:
                 raise LinterError("--max-bytes는 1 이상의 정수여야 합니다.")
-            rules = {**rules, "max_bytes": args.max_bytes}
+            rules = {
+                **rules,
+                "max_bytes": args.max_bytes,
+                "target_min_bytes": min(rules.get("target_min_bytes", 0), args.max_bytes),
+            }
         text = read_document(args.file)
         result = lint_text(text, str(args.file), rules)
     except LinterError as exc:
