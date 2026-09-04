@@ -1,21 +1,28 @@
 # 학생별 실제 입력 데이터는 개인정보를 포함할 수 있으므로 추적하지 않습니다.
-학생정보/*.yaml
-!학생정보/template.yaml
-!학생정보/example.yaml
-보고서/*.docx
+version_B/학생정보/*.yaml
+!version_B/학생정보/template.yaml
+!version_B/학생정보/example.yaml
+version_B/보고서/*.docx
 
 # AI가 생성한 학생별 결과물은 로컬에만 보관합니다.
-세특/*.md
-!세특/README.md
+version_B/세특/*.md
+!version_B/세특/README.md
+version_B/창체/*.md
+!version_B/창체/README.md
+
+# 초안 검토 체크포인트(run_state)는 학생 식별 가능한 초안을 담으므로 추적하지 않습니다.
+version_B/run_state/*.json
+version_B/run_state/*.md
+!version_B/run_state/README.md
 
 # 학생 원본 보고서는 개인정보를 포함할 수 있으므로 추적하지 않습니다.
-보고서/*
-!보고서/README.md
+version_B/보고서/*
+!version_B/보고서/README.md
 
 # Python 실행 중 생성되는 임시 파일
 __pycache__/
 *.py[cod]
-!python_portable/*.pyd
+!version_B/python_portable/*.pyd
 
 # 편집기 및 운영체제 임시 파일
 .vscode/
@@ -23,4 +30,9 @@ __pycache__/
 Thumbs.db
 
 # 빌드된 배포 파일
-dist/
+version_B/dist/
+
+# C버전(자율 멀티에이전트): API 키와 진행 상태(SQLite)는 로컬에만 둔다.
+version_C/.env
+version_C/run_state_c.sqlite3
+version_C/.venv/
