@@ -1,0 +1,19 @@
+{
+  "_comment": [
+    "규정 코퍼스에 넣을 원본 선언. 경로는 이 파일 기준 상대 경로이며 저장소 밖은 거부된다.",
+    "kind: rules_json | markdown | pdf",
+    "policy_year: 시행 학년도. 같은 문서의 개정판은 학년도를 달리해 함께 둔다.",
+    "provenance: official_pdf(교육부 원문) | user_excerpt(사용자 제공 발췌) | project_derived",
+    "실제 기재요령 PDF를 넣으려면 policy_corpus/에 두고 kind를 pdf로 항목을 추가하면 된다."
+  ],
+  "sources": [
+    {
+      "doc_id": "moe-2026-excerpt",
+      "kind": "rules_json",
+      "path": "../../version_A/rules.json",
+      "policy_year": 2026,
+      "source_url": "https://star.moe.go.kr",
+      "enabled": true
+    }
+  ]
+}

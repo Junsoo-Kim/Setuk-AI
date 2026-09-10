@@ -16,12 +16,15 @@ if str(ROOT) not in sys.path:
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
-from version_C import pipeline
+from version_C import llm, pipeline
 from version_C.llm import ContractParseError, contract_as_text, parse_contract
 
 VALID_DRAFT_TEXT = "탐구 활동을 통해 문제를 해결하는 과정에서 분석 능력이 드러남."
 TAB_BROKEN_TEXT = "탭\t문자가 섞인 본문."
 FIXED_TEXT = "탭 문자를 제거한 본문."
+
+SOURCE_PATH = "학생정보/테스트.yaml"
+OUTPUT_PATH = "세특/테스트.md"
 
 RULES_JSON = {
     "schema_version": 1,
@@ -71,7 +74,8 @@ def patched_pipeline(tmp_root: Path | None, agent: FakeAgent) -> ExitStack:
     stack = ExitStack()
     if tmp_root is not None:
         stack.enter_context(patch.object(pipeline, "ROOT", tmp_root))
-    stack.enter_context(patch.object(pipeline, "call_agent", agent))
+    # 계약 요청은 llm.request_contract를 거쳐 llm.call_agent를 부른다.
+    stack.enter_context(patch.object(llm, "call_agent", agent))
     stack.enter_context(patch.object(pipeline, "load_config", lambda: None))
     return stack
 
@@ -79,21 +83,39 @@ def patched_pipeline(tmp_root: Path | None, agent: FakeAgent) -> ExitStack:
 def structured_facts_response() -> str:
     return yaml_block(
         "contract: STRUCTURED_FACTS_V1\n"
-        'source_path: "학생정보/테스트.yaml"\n'
-        'output_path: "세특/테스트.md"\n'
-        "activities: []\n"
+        f'source_path: "{SOURCE_PATH}"\n'
+        f'output_path: "{OUTPUT_PATH}"\n'
+        "activities:\n"
+        "  - activity_id: A1\n"
+        '    topic: "탐구"\n'
+        "    propositions:\n"
+        "      - id: A1-P1\n"
+        "        role: action\n"
+        '        proposition: "자료를 비교함"\n'
+        '        evidence_paths: ["activities[0].process[0]"]\n'
+        "    supported_competencies:\n"
+        '      - competency: "분석력"\n'
+        '        support_ids: ["A1-P1"]\n'
     )
 
 
 def draft_response(text: str = VALID_DRAFT_TEXT) -> str:
-    return yaml_block(f'contract: DRAFT_V1\ntext: "{text}"\n')
+    return yaml_block(
+        "contract: DRAFT_V1\n"
+        f'source_path: "{SOURCE_PATH}"\n'
+        f'output_path: "{OUTPUT_PATH}"\n'
+        'used_proposition_ids: ["A1-P1"]\n'
+        f'text: "{text}"\n'
+    )
 
 
 def evaluate_response(final_text: str = VALID_DRAFT_TEXT) -> str:
     return yaml_block(
         "contract: EVALUATED_RESULT_V1\n"
-        'output_path: "세특/테스트.md"\n'
+        f'source_path: "{SOURCE_PATH}"\n'
+        f'output_path: "{OUTPUT_PATH}"\n'
         "saved: true\n"
+        'used_proposition_ids: ["A1-P1"]\n'
         f'final_text: "{final_text}"\n'
     )
 
@@ -102,9 +124,13 @@ def fix_response(final_text: str = FIXED_TEXT) -> str:
     return yaml_block(f'contract: EVALUATED_RESULT_V1\nfinal_text: "{final_text}"\n')
 
 
+def start_state() -> dict:
+    return {"student_key": "테스트", "mode": "yaml", "yaml_path": SOURCE_PATH}
+
+
 class ContractParsingTests(unittest.TestCase):
     def test_parse_contract_extracts_yaml_block(self):
-        raw = "설명 텍스트\n" + yaml_block("contract: DRAFT_V1\ntext: \"본문\"\n") + "\n끝"
+        raw = "설명 텍스트\n" + yaml_block('contract: DRAFT_V1\ntext: "본문"\n') + "\n끝"
         contract = parse_contract(raw)
         self.assertEqual(contract["contract"], "DRAFT_V1")
         self.assertEqual(contract["text"], "본문")
@@ -135,10 +161,7 @@ class HappyPathTests(unittest.TestCase):
             with patched_pipeline(tmp_root, agent):
                 graph = pipeline.build_graph(MemorySaver())
                 config = {"configurable": {"thread_id": "t-happy"}}
-                state = graph.invoke(
-                    {"student_key": "테스트", "mode": "yaml", "yaml_path": "학생정보/테스트.yaml"},
-                    config=config,
-                )
+                state = graph.invoke(start_state(), config=config)
                 self.assertIn("__interrupt__", state)
                 self.assertEqual(state["__interrupt__"][0].value["draft_text"], VALID_DRAFT_TEXT)
 
@@ -164,10 +187,7 @@ class HappyPathTests(unittest.TestCase):
             with patched_pipeline(tmp_root, agent):
                 graph = pipeline.build_graph(MemorySaver())
                 config = {"configurable": {"thread_id": "t-edit"}}
-                graph.invoke(
-                    {"student_key": "테스트", "mode": "yaml", "yaml_path": "학생정보/테스트.yaml"},
-                    config=config,
-                )
+                graph.invoke(start_state(), config=config)
                 graph.invoke(
                     Command(resume={"approved": True, "edited_text": edited}), config=config
                 )
@@ -195,10 +215,7 @@ class RejectionLoopTests(unittest.TestCase):
             with patched_pipeline(tmp_root, agent):
                 graph = pipeline.build_graph(MemorySaver())
                 config = {"configurable": {"thread_id": "t-reject"}}
-                state = graph.invoke(
-                    {"student_key": "테스트", "mode": "yaml", "yaml_path": "학생정보/테스트.yaml"},
-                    config=config,
-                )
+                state = graph.invoke(start_state(), config=config)
                 self.assertEqual(state["__interrupt__"][0].value["draft_text"], VALID_DRAFT_TEXT)
 
                 state = graph.invoke(
@@ -237,10 +254,7 @@ class LintRetryTests(unittest.TestCase):
             with patched_pipeline(tmp_root, agent):
                 graph = pipeline.build_graph(MemorySaver())
                 config = {"configurable": {"thread_id": "t-fix"}}
-                graph.invoke(
-                    {"student_key": "테스트", "mode": "yaml", "yaml_path": "학생정보/테스트.yaml"},
-                    config=config,
-                )
+                graph.invoke(start_state(), config=config)
                 state = graph.invoke(
                     Command(resume={"approved": True, "edited_text": ""}), config=config
                 )
@@ -255,17 +269,18 @@ class LintRetryTests(unittest.TestCase):
             (tmp_root / "학생정보" / "테스트.yaml").write_text(
                 "schema_version: 1\n", encoding="utf-8"
             )
-            responses = [structured_facts_response(), draft_response(), evaluate_response(TAB_BROKEN_TEXT)]
+            responses = [
+                structured_facts_response(),
+                draft_response(),
+                evaluate_response(TAB_BROKEN_TEXT),
+            ]
             responses += [fix_response(TAB_BROKEN_TEXT) for _ in range(pipeline.MAX_LINT_RETRIES)]
             agent = FakeAgent(responses)
 
             with patched_pipeline(tmp_root, agent):
                 graph = pipeline.build_graph(MemorySaver())
                 config = {"configurable": {"thread_id": "t-stop"}}
-                graph.invoke(
-                    {"student_key": "테스트", "mode": "yaml", "yaml_path": "학생정보/테스트.yaml"},
-                    config=config,
-                )
+                graph.invoke(start_state(), config=config)
                 state = graph.invoke(
                     Command(resume={"approved": True, "edited_text": ""}), config=config
                 )
@@ -287,12 +302,14 @@ class IngestNodeTests(unittest.TestCase):
 
     def test_structure_needs_input_short_circuits_without_drafting(self):
         needs_input = yaml_block(
-            'contract: NEEDS_INPUT_V1\nsource_path: "학생정보/테스트.yaml"\nquestions: []\n'
+            f'contract: NEEDS_INPUT_V1\nsource_path: "{SOURCE_PATH}"\nquestions: []\n'
         )
         agent = FakeAgent([needs_input])
         with patched_pipeline(None, agent):
             result = pipeline.node_structure({"yaml_content": "schema_version: 1\n"})
-        self.assertIn("error", result)
+        # 정보 부족은 고장이 아니라 사람이 채워야 하는 공백이므로 error가 아니다.
+        self.assertNotIn("error", result)
+        self.assertEqual(result["needs_input"]["kind"], "questions")
         self.assertEqual(len(agent.calls), 1)
 
 
@@ -305,9 +322,12 @@ DOCUMENT_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 """
 
 
-def make_docx(path: Path) -> None:
+def make_docx(path: Path, body: str | None = None) -> None:
+    xml = DOCUMENT_XML
+    if body is not None:
+        xml = xml.replace("탐구 보고서 본문입니다.", body)
     with zipfile.ZipFile(path, "w") as document:
-        document.writestr("word/document.xml", DOCUMENT_XML)
+        document.writestr("word/document.xml", xml)
 
 
 class PathSafetyTests(unittest.TestCase):
@@ -393,7 +413,8 @@ class PathSafetyTests(unittest.TestCase):
                 'yaml_path: "../outside.yaml"\n'
                 'yaml_body: "schema_version: 1"\n'
             )
-            agent = FakeAgent([malicious])
+            # 계약 검증이 1회 repair를 요청하므로 같은 응답을 두 번 준비한다.
+            agent = FakeAgent([malicious, malicious])
 
             with patched_pipeline(tmp_root, agent):
                 result = pipeline.node_ingest(
@@ -404,7 +425,9 @@ class PathSafetyTests(unittest.TestCase):
                     }
                 )
 
-            self.assertIn("error", result)
+            # 계약 검증에서 걸리므로 needs_input으로 넘어간다. 핵심은 파일이 쓰이지 않는 것.
+            self.assertIn("needs_input", result)
+            self.assertIn("yaml_path", result["needs_input"]["problems"])
             self.assertFalse((outer_path / "outside.yaml").exists())
 
 

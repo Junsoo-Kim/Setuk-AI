@@ -32,7 +32,15 @@ Thumbs.db
 # 빌드된 배포 파일
 version_B/dist/
 
-# C버전(자율 멀티에이전트): API 키와 진행 상태(SQLite)는 로컬에만 둔다.
+# C버전(자율 멀티에이전트): API 키와 진행 상태는 로컬에만 둔다.
+# run_state_c.sqlite3(LangGraph 체크포인트)와 setuk_c.sqlite3(작업 목록·검토 이력·감사 로그)는
+# 둘 다 학생 식별 가능한 초안을 담는다.
 version_C/.env
 version_C/run_state_c.sqlite3
+version_C/setuk_c.sqlite3
+version_C/*.sqlite3-wal
+version_C/*.sqlite3-shm
 version_C/.venv/
+
+# 규정 코퍼스 빌드 캐시. 원본(sources.json + 참조 파일)에서 언제든 다시 만들 수 있다.
+version_C/policy_corpus/built/

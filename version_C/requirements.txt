@@ -1,6 +1,23 @@
+# 직접 의존성(범위). 재현 가능한 설치는 requirements.lock.txt를 쓴다.
+#   pip install -r requirements.lock.txt
 anthropic>=1.3.0,<2
 langgraph>=1.2.0,<2
 langgraph-checkpoint-sqlite>=3.1.0,<4
+langgraph-checkpoint-postgres>=3.0.0,<4
 flask>=3.1.0,<4
 python-dotenv>=1.2.0,<2
 pyyaml>=6.0,<7
+pydantic>=2.9,<3
+SQLAlchemy>=2.0,<3
+alembic>=1.13,<2
+psycopg[binary]>=3.2,<4
+# 규정 RAG: 기재요령 PDF 원문에서 페이지 번호를 보존하며 본문을 추출한다.
+pymupdf>=1.24,<2
+# MCP 도구 서버(stdio). Claude Code/Cline 등이 붙는다.
+mcp>=1.2,<2
+
+# 선택: dense 검색을 켤 때만 필요하다. 기본은 sparse-only이므로 설치하지 않아도 된다.
+#   SETUK_EMBEDDING_PROVIDER=voyage  -> voyageai
+#   SETUK_EMBEDDING_PROVIDER=openai  -> openai
+# voyageai>=0.3,<1
+# openai>=1.40,<2
