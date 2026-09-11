@@ -17,6 +17,7 @@ thread_id)로 같은 데이터베이스**를 가리키게 한다.
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from contextlib import contextmanager
@@ -24,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -32,6 +34,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    TypeDecorator,
     UniqueConstraint,
     create_engine,
     select,
@@ -46,6 +49,76 @@ from sqlalchemy.orm import (
 )
 
 DEFAULT_SQLITE_PATH = Path(__file__).resolve().parent / "setuk_c.sqlite3"
+
+DECRYPTION_FAILED_MARKER = "[복호화 실패: SETUK_DB_ENCRYPTION_KEY를 확인하세요]"
+_ENC_PREFIX = "enc1:"
+
+
+def _fernet() -> Fernet | None:
+    raw = os.environ.get("SETUK_DB_ENCRYPTION_KEY", "").strip()
+    if not raw:
+        return None
+    return Fernet(raw.encode("utf-8"))
+
+
+def encryption_enabled() -> bool:
+    return _fernet() is not None
+
+
+class EncryptedText(TypeDecorator):
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value: str | None, dialect) -> str | None:
+        if value is None:
+            return None
+        fernet = _fernet()
+        if fernet is None:
+            return value
+        token = fernet.encrypt(value.encode("utf-8")).decode("ascii")
+        return _ENC_PREFIX + token
+
+    def process_result_value(self, value: str | None, dialect) -> str | None:
+        if value is None or not value.startswith(_ENC_PREFIX):
+            return value
+        fernet = _fernet()
+        if fernet is None:
+            return DECRYPTION_FAILED_MARKER
+        try:
+            return fernet.decrypt(value[len(_ENC_PREFIX):].encode("ascii")).decode("utf-8")
+        except InvalidToken:
+            return DECRYPTION_FAILED_MARKER
+
+
+class EncryptedJSON(TypeDecorator):
+    impl = Text
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect) -> str | None:
+        if value is None:
+            return None
+        serialized = json.dumps(value, ensure_ascii=False)
+        fernet = _fernet()
+        if fernet is None:
+            return serialized
+        token = fernet.encrypt(serialized.encode("utf-8")).decode("ascii")
+        return _ENC_PREFIX + token
+
+    def process_result_value(self, value: str | None, dialect) -> Any:
+        if value is None:
+            return None
+        if value.startswith(_ENC_PREFIX):
+            fernet = _fernet()
+            if fernet is None:
+                return {}
+            try:
+                value = fernet.decrypt(value[len(_ENC_PREFIX):].encode("ascii")).decode("utf-8")
+            except InvalidToken:
+                return {}
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return {}
 
 # 서버가 죽은 뒤 남은 RUNNING 작업을 회수하기까지 기다리는 시간.
 LEASE_SECONDS = 120
@@ -79,8 +152,9 @@ class Run(Base):
     __tablename__ = "runs"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    student_key: Mapped[str] = mapped_column(String(128))
+    student_key: Mapped[str] = mapped_column(EncryptedText)
     pseudonym: Mapped[str] = mapped_column(String(32), index=True)
+    owner: Mapped[str | None] = mapped_column(String(64), index=True, default=None)
     mode: Mapped[str] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(32), index=True)
 
@@ -88,7 +162,7 @@ class Run(Base):
     yaml_path: Mapped[str | None] = mapped_column(String(512), default=None)
     output_path: Mapped[str | None] = mapped_column(String(512), default=None)
 
-    draft_text: Mapped[str | None] = mapped_column(Text, default=None)
+    draft_text: Mapped[str | None] = mapped_column(EncryptedText, default=None)
     draft_hash: Mapped[str | None] = mapped_column(String(64), default=None)
     lint_summary: Mapped[str | None] = mapped_column(Text, default=None)
     lint_retry_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -167,7 +241,7 @@ class Artifact(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: uuid.uuid4().hex)
     run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
     kind: Mapped[str] = mapped_column(String(32))  # structured_facts | draft | final
-    content: Mapped[str] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(EncryptedText)
     content_hash: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -186,6 +260,21 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
+ROLE_TEACHER = "teacher"
+ROLE_ADMIN = "admin"
+
+
+class Teacher(Base):
+    """로그인 계정. 세션 기반 인증과 역할(RBAC)의 기준이 된다."""
+
+    __tablename__ = "teachers"
+
+    username: Mapped[str] = mapped_column(String(64), primary_key=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(16), default=ROLE_TEACHER)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class PseudonymMap(Base):
     """실행 하나의 실명 ↔ 별칭 치환표.
 
@@ -198,7 +287,7 @@ class PseudonymMap(Base):
     __tablename__ = "pseudonym_maps"
 
     run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    mapping: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False)
+    mapping: Mapped[dict[str, str]] = mapped_column(EncryptedJSON, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )

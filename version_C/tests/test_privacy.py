@@ -175,17 +175,18 @@ class PseudonymSeparationTests(unittest.TestCase):
                 )
         self.assertNotIn("identifiers", result)
 
-    def test_ingest_saves_the_mapping_under_the_real_thread_id(self):
+    def test_ingest_saves_the_mapping_under_the_key_later_nodes_will_look_up(self):
         with TempStudentProject() as tmp_root:
             (tmp_root / "학생정보" / "김준수.yaml").write_text(
                 'schema_version: 1\nstudent:\n  name: "김준수"\n', encoding="utf-8"
             )
             with patch.object(pipeline, "ROOT", tmp_root):
-                pipeline.node_ingest(
+                result = pipeline.node_ingest(
                     {"student_key": "김준수", "mode": "yaml", "yaml_path": "학생정보/김준수.yaml"},
                     config={"configurable": {"thread_id": "sep-2"}},
                 )
-        mapping = pipeline._pseudonym_store().load("sep-2")
+        next_node_key = pipeline._run_id(result, {"configurable": {"thread_id": "sep-2"}})
+        mapping = pipeline._pseudonym_store().load(next_node_key)
         self.assertIn("김준수", mapping)
 
     def test_different_runs_do_not_share_a_mapping(self):

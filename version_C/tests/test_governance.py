@@ -33,6 +33,7 @@ from version_C.db import (
     Artifact,
     AuditLog,
     Database,
+    PseudonymMap,
     Review,
     Run,
     utcnow,
@@ -167,6 +168,17 @@ class StudentDeletionTests(unittest.TestCase):
         self.assertEqual(removed["reviews"], 1)
         with self.db.session() as session:
             self.assertIsNone(session.get(Run, "gone"))
+
+    def test_deleting_by_pseudonym_also_removes_the_pseudonym_map(self):
+        target = privacy.pseudonym_for("지울학생")
+        with self.db.session() as session:
+            session.add(PseudonymMap(run_id=target, mapping={"지울학생": "[학생1]"}))
+            session.add(PseudonymMap(run_id="남길학생-run", mapping={"남길학생": "[학생1]"}))
+        removed = retention.purge_student(self.db, pseudonym=target)
+        self.assertEqual(removed["pseudonym_maps"], 1)
+        with self.db.session() as session:
+            self.assertIsNone(session.get(PseudonymMap, target))
+            self.assertIsNotNone(session.get(PseudonymMap, "남길학생-run"))
 
     def test_other_students_data_is_untouched(self):
         retention.purge_student(self.db, pseudonym=privacy.pseudonym_for("지울학생"))
