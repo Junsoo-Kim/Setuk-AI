@@ -31,6 +31,12 @@ EMBEDDING_DIM = 1024
 
 
 def upgrade() -> None:
+    # 이 파일 docstring의 약속("SQLite 배포에는 적용하지 않는다")을 실제로 지킨다.
+    # 방언 검사 없이 그대로 두면 `alembic upgrade head`가 SQLite에서 `CREATE
+    # EXTENSION`(PostgreSQL 전용 구문)에 걸려 항상 실패한다 — 즉 기본 SQLite
+    # 배포에서는 어떤 리비전도 head까지 올라갈 수 없었다.
+    if op.get_bind().dialect.name != "postgresql":
+        return
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.create_table(
         "policy_chunks",
@@ -65,4 +71,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if op.get_bind().dialect.name != "postgresql":
+        return
     op.drop_table("policy_chunks")
