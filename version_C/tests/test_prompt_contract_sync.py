@@ -37,6 +37,7 @@ if str(ROOT) not in sys.path:
 from version_C import prompts
 from version_C.contracts import (
     DraftV1,
+    DraftV2,
     EvaluatedResultV1,
     NeedsInputV1,
     ReportIngestedV1,
@@ -46,13 +47,30 @@ from version_C.contracts import (
 
 _YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n(.*?)```", re.DOTALL)
 
+# 지침 문서에 여전히 나오는(활성) 계약뿐 아니라, 과거 데이터를 읽기 위해 코드에만
+# 남아 있는 계약(DRAFT_V1 — DRAFT_V2로 이전하는 마이그레이션 소스)도 여기 둔다.
+# "선언된 계약 이름이 모델과 대응하는가"는 이 전체 사전으로 확인하고, "지침 문서가
+# 빠짐없이 다 검사됐는가"는 아래 ACTIVE_CONTRACTS로 따로 확인한다.
 NAME_TO_MODEL = {
     "REPORT_NEEDS_INPUT_V1": ReportNeedsInputV1,
     "REPORT_INGESTED_V1": ReportIngestedV1,
     "NEEDS_INPUT_V1": NeedsInputV1,
     "STRUCTURED_FACTS_V1": StructuredFactsV1,
-    "DRAFT_V1": DraftV1,
+    "DRAFT_V1": DraftV1,  # 지침엔 더 이상 없음: DRAFT_V2로의 마이그레이션 소스로만 남아 있다.
+    "DRAFT_V2": DraftV2,
     "EVALUATED_RESULT_V1": EvaluatedResultV1,
+}
+
+# 현재 지침 문서(.agent/*.md)가 실제로 선언해야 하는 계약. DRAFT_V1처럼 코드에만
+# 남은 레거시 계약은 여기 넣지 않는다 — 넣으면 "지침에 없는데 왜 안 나왔냐"고
+# 테스트가 스스로 잘못 실패한다.
+ACTIVE_CONTRACTS = {
+    "REPORT_NEEDS_INPUT_V1",
+    "REPORT_INGESTED_V1",
+    "NEEDS_INPUT_V1",
+    "STRUCTURED_FACTS_V1",
+    "DRAFT_V2",
+    "EVALUATED_RESULT_V1",
 }
 
 # 지침 문서에는 없지만 코드가 파일 저장을 대행하려고 추가로 요구하는 필드.
@@ -127,7 +145,7 @@ class ContractFieldSyncTests(unittest.TestCase):
 
         # 지침 문서 구성이 바뀌어 블록을 하나도 못 찾는 경우, 테스트가 조용히
         # 통과하며 아무것도 검증하지 않게 되는 것을 막는다.
-        self.assertEqual(checked_contracts, set(NAME_TO_MODEL.keys()))
+        self.assertEqual(checked_contracts, ACTIVE_CONTRACTS)
 
 
 if __name__ == "__main__":
