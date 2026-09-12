@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from ..db import database_url
 from .corpus import DEFAULT_CORPUS_DIR, load_or_build
 from .models import CorpusManifest, PolicyChunk, SearchHit
 from .retrieval import PolicyRetriever
@@ -146,7 +147,17 @@ class PolicyService:
                 vectors = embed([chunk.text for chunk in self.chunks])
             except Exception:
                 vectors = None  # 임베딩 실패 시 sparse-only 폴백
-        self.retriever = PolicyRetriever(self.chunks, embed=embed, chunk_vectors=vectors)
+
+        if database_url().startswith("postgres"):
+            from ..db import Database
+            from .postgres_retrieval import PostgresPolicyRetriever
+
+            self.retriever = PostgresPolicyRetriever(
+                Database(), self.chunks, self.manifest.index_version,
+                embed=embed, chunk_vectors=vectors,
+            )
+        else:
+            self.retriever = PolicyRetriever(self.chunks, embed=embed, chunk_vectors=vectors)
         self._by_id = {chunk.chunk_id: chunk for chunk in self.chunks}
 
     # ------------------------------------------------------------------ 검색

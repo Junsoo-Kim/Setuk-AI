@@ -4,7 +4,7 @@
 
 `STRUCTURED_FACTS_V1`의 명제만 사용하여 학습 동기, 탐구 활동, 학업 역량 및 성장의 흐름이 드러나는 세특 초안을 작성한다.
 
-> 파이프라인상 역할: 성향분석·초안 작성 에이전트. 이 단계의 산출물(`DRAFT_V1`)은 04로 바로 넘어가지 않고 Human-in-the-Loop 초안 검토 체크포인트의 입력이 된다 — 절차는 `AGENTS.md`의 해당 절 참고.
+> 파이프라인상 역할: 성향분석·초안 작성 에이전트. 이 단계의 산출물(`DRAFT_V2`)은 04로 바로 넘어가지 않고 Human-in-the-Loop 초안 검토 체크포인트의 입력이 된다 — 절차는 `AGENTS.md`의 해당 절 참고.
 
 ## 입력
 
@@ -79,13 +79,19 @@
 - 같은 활동이나 역량을 다른 말로 반복하거나 사실 장부에 없는 내용을 추가해서는 안 된다. 사용할 근거가 부족하면 억지로 목표 하한을 채우지 않고 `length_exception_reason`에 이유를 기록한다.
 - 바이트를 줄일 때는 근거 없는 수식어, 중복 표현, 덜 중요한 활동 순서로 제거한다.
 
-## 출력 계약: `DRAFT_V1`
+## 출력 계약: `DRAFT_V2`
 
 ```yaml
-contract: DRAFT_V1
+contract: DRAFT_V2
 source_path: "학생정보/<식별자>.yaml"
 output_path: "세특/<식별자>.md"
-used_proposition_ids: ["A1-P1", "A1-P2"]
+sentences:
+  - text: "초안의 한 문장 그대로"
+    source_ids: ["A1-P1"]
+    confidence: 0.9
+  - text: "초안의 다음 문장 그대로"
+    source_ids: ["A1-P2"]
+    confidence: 0.8
 omitted_proposition_ids: []
 target_byte_range: [1400, 1500]
 estimated_byte_count: 1450
@@ -97,11 +103,11 @@ teacher_evaluation:
 text: "마크다운 장식 없는 한 문단의 세특 초안"
 ```
 
-`used_proposition_ids`에는 초안의 모든 사실을 뒷받침하는 명제 ID를 기록한다. `omitted_proposition_ids`는 분량이나 제외 조건 때문에 사용하지 않은 명제만 기록한다.
+`sentences`는 초안(`text`)을 문장 단위로 나눈 목록이다. 각 문장이 근거로 삼은 명제 ID를 `source_ids`에 적어, "초안 전체가 이 명제들을 근거로 한다"가 아니라 "이 문장은 이 명제 때문에 이렇게 썼다"를 되짚을 수 있게 한다. `confidence`는 그 문장이 명제 근거와 실제로 얼마나 밀접한지에 대한 자체 평가(0~1)이며, 선택 항목이다. `sentences`의 모든 `source_ids`를 합친 것이 곧 이 초안이 사용한 전체 명제 목록이 된다 — 별도의 `used_proposition_ids` 필드는 없다. `omitted_proposition_ids`는 분량이나 제외 조건 때문에 사용하지 않은 명제만 기록한다.
 
 ## 자체 점검
 
-- 초안의 각 사실을 `used_proposition_ids`로 되짚을 수 있는가?
+- 초안의 모든 문장이 `sentences`에 나뉘어 있고, 각 문장의 `source_ids`로 근거를 되짚을 수 있는가?
 - 동기에서 활동, 결과, 성장으로 자연스럽게 연결되는가?
 - 역량 판단 앞에 이를 보여 주는 행동이 있는가?
 - `teacher_evaluation`의 역량과 `support_ids`가 `supported_competencies`에 실제로 존재하는가?

@@ -144,7 +144,7 @@ A·B 모드에서 입력 YAML이 결정되면 출력 경로는 YAML stem을 그�
 1. 보고서 입력 모드라면 `.agent/01_report_ingestion.md`를 먼저 완료한다. 기존 YAML 직접 입력 모드에서만 이 단계를 생략한다.
 2. `.agent/02_data_structuring.md`를 읽고 `STRUCTURED_FACTS_V1`을 생성한다.
 3. 결과가 `NEEDS_INPUT_V1`이면 즉시 중단하고 질문만 사용자에게 전달한다. 이후 지침을 읽거나 결과 파일을 만들지 않는다.
-4. `.agent/03_drafting.md`를 읽고 `STRUCTURED_FACTS_V1`에서 `DRAFT_V1`을 생성한다.
+4. `.agent/03_drafting.md`를 읽고 `STRUCTURED_FACTS_V1`에서 `DRAFT_V2`를 생성한다.
 5. `.agent/04_evaluation.md`를 읽고 두 계약을 검토한 후 계약의 `output_path`에 최종 본문을 저장한다.
 
 4번과 5번 사이에는 "2-A. Human-in-the-Loop 체크포인트"를 반드시 거친다.
@@ -177,7 +177,7 @@ A·B 모드에서 입력 YAML이 결정되면 출력 경로는 YAML stem을 그�
 
 ## 2-A. Human-in-the-Loop 체크포인트 (초안 검토, run_state)
 
-세특 모드(A·B), 창체 모드(C), 물리 통합 모드(E)에서는 03(또는 03c/03e)이 만든 `DRAFT_V1`을 04로 곧바로 넘기지 않는다. 교사가 초안을 직접 검토·승인한 뒤에만 04를 실행한다. D모드와 F모드는 이 체크포인트를 사용하지 않는다 — D는 어떤 YAML·MD 파일도 만들지 않고, F는 02·03·04 자체를 거치지 않기 때문이다.
+세특 모드(A·B), 창체 모드(C), 물리 통합 모드(E)에서는 03이 만든 `DRAFT_V2`(또는 03c/03e가 만든 `DRAFT_V1`)를 04로 곧바로 넘기지 않는다. 교사가 초안을 직접 검토·승인한 뒤에만 04를 실행한다. D모드와 F모드는 이 체크포인트를 사용하지 않는다 — D는 어떤 YAML·MD 파일도 만들지 않고, F는 02·03·04 자체를 거치지 않기 때문이다.
 
 이 체크포인트는 `run_state/<식별자>.json`(스키마와 상태값은 `기획서.md` 6.3)에 기록하며, `scripts/run_state.py`와 `scripts/review_cli.py`로만 읽고 쓴다. 두 스크립트는 문장을 생성하지 않는 결정적 도구이며, 3번(Linter 실행 파일 결정)과 동일하게 반드시 `python_portable/python.exe`로 실행하고 시스템 Python을 쓰지 않는다.
 
@@ -187,7 +187,7 @@ A·B 모드에서 입력 YAML이 결정되면 출력 경로는 YAML stem을 그�
    ```
    `<모드문자>`는 현재 실행 중인 모드 하나(`A`, `B`, `C`, `E`)를 그대로 쓴다.
 2. 01단계(보고서 입력 또는 YAML 직접 지정) 완료 후 `set-report-ingested --yaml-path <경로>`를, 02단계 완료 후 `set-structured`를 실행해 진행 상태를 기록한다.
-3. 03(또는 03c/03e)이 `DRAFT_V1.text`를 완성하면 그 본문을 임시 파일로 저장한 뒤 다음을 순서대로 실행한다.
+3. 03이 `DRAFT_V2.text`(또는 03c/03e가 `DRAFT_V1.text`)를 완성하면 그 본문을 임시 파일로 저장한 뒤 다음을 순서대로 실행한다.
    ```powershell
    & '.\python_portable\python.exe' '.\scripts\run_state.py' 'set-drafted' '<식별자>' '--draft-file' '<임시파일 경로>'
    & '.\python_portable\python.exe' '.\scripts\run_state.py' 'set-awaiting-review' '<식별자>'
@@ -200,7 +200,7 @@ A·B 모드에서 입력 YAML이 결정되면 출력 경로는 YAML stem을 그�
    ```powershell
    & '.\python_portable\python.exe' '.\scripts\run_state.py' 'show' '<식별자>'
    ```
-   - `status`가 `REVIEWED`이면 `steps.review.edited_text`를 `DRAFT_V1.text` 대신 04의 입력 본문으로 사용해 04를 진행한다.
+   - `status`가 `REVIEWED`이면 `steps.review.edited_text`를 `DRAFT_V2.text`(또는 `DRAFT_V1.text`) 대신 04의 입력 본문으로 사용해 04를 진행한다.
    - `status`가 `REVIEW_REJECTED`이면 04를 실행하지 않는다. `steps.review.reviewer_note`의 사유를 반영해 03(또는 03c/03e)부터 초안을 다시 작성한 뒤, 3번부터 이 체크포인트를 다시 거친다.
    - `status`가 여전히 `AWAITING_REVIEW`이면 검토가 끝나지 않은 것이므로 04를 실행하지 않고 아직 승인 대기 중이라고 보고한다.
    - 그 외 상태이면 진행 순서가 어긋난 것이므로 저장하지 않고 현재 상태를 그대로 보고한다.

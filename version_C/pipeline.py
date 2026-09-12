@@ -253,9 +253,10 @@ def node_ingest(state: PipelineState, config: RunnableConfig | None = None) -> d
     except PathSafetyError as exc:
         return {"error": str(exc)}
 
-    run_id = _run_id(state, config)
+    pseudonym = privacy.pseudonym_for(student_key)
+    run_id = pseudonym if pseudonym else _run_id(state, config)
     base: dict[str, Any] = {
-        "pseudonym": privacy.pseudonym_for(student_key),
+        "pseudonym": pseudonym,
         "prompt_version": prompt_version(),
     }
 
@@ -417,7 +418,9 @@ def node_draft(state: PipelineState, config: RunnableConfig | None = None) -> di
         "다음은 직전 단계의 STRUCTURED_FACTS_V1이다:\n\n"
         f"```yaml\n{state['structured_facts_yaml']}```\n"
         f"{revision_note}\n\n"
-        "위 지침을 그대로 따라 DRAFT_V1 yaml 계약 블록 하나로만 응답하라."
+        "위 지침을 그대로 따라 DRAFT_V2 yaml 계약 블록 하나로만 응답하라. "
+        "text를 문장 단위로 나눠 sentences 배열의 각 항목에 그 문장이 근거로 삼은 "
+        "명제 ID를 source_ids로 적어라."
     )
 
     def check(contract):
@@ -497,7 +500,7 @@ def node_evaluate(state: PipelineState, config: RunnableConfig | None = None) ->
     user_content = (
         "다음은 STRUCTURED_FACTS_V1이다:\n\n"
         f"```yaml\n{state['structured_facts_yaml']}```\n\n"
-        "다음은 교사가 검토·승인한 DRAFT_V1.text이다(이 텍스트가 이번 평가·수정의 대상이다):\n\n"
+        "다음은 교사가 검토·승인한 DRAFT_V2.text이다(이 텍스트가 이번 평가·수정의 대상이다):\n\n"
         f"{mapper.mask(state['reviewed_text'])}\n\n"
         f"output_path는 '{output_path_rel}'로 고정한다.\n\n"
         "위 지침을 그대로 따라 평가·수정하라. 이 코드가 파일 저장을 대신 하므로, "

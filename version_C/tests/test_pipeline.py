@@ -101,10 +101,12 @@ def structured_facts_response() -> str:
 
 def draft_response(text: str = VALID_DRAFT_TEXT) -> str:
     return yaml_block(
-        "contract: DRAFT_V1\n"
+        "contract: DRAFT_V2\n"
         f'source_path: "{SOURCE_PATH}"\n'
         f'output_path: "{OUTPUT_PATH}"\n'
-        'used_proposition_ids: ["A1-P1"]\n'
+        "sentences:\n"
+        f'  - text: "{text}"\n'
+        '    source_ids: ["A1-P1"]\n'
         f'text: "{text}"\n'
     )
 

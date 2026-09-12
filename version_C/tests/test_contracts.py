@@ -60,6 +60,18 @@ def draft(**overrides) -> dict:
     return data
 
 
+def draft_v2(**overrides) -> dict:
+    data = {
+        "contract": "DRAFT_V2",
+        "source_path": SOURCE,
+        "output_path": OUTPUT,
+        "sentences": [{"text": "탐구 과정에서 자료를 비교함.", "source_ids": ["A1-P1"]}],
+        "text": "탐구 과정에서 자료를 비교하고 결론을 도출함.",
+    }
+    data.update(overrides)
+    return data
+
+
 class SchemaTests(unittest.TestCase):
     def test_valid_structured_facts_parses(self):
         parsed = contracts.parse_stage_contract(facts(), "structure")
@@ -121,6 +133,23 @@ class SchemaTests(unittest.TestCase):
         )
         parsed = contracts.parse_stage_contract(full_draft, "draft")
         self.assertEqual(parsed.target_byte_range, [1400, 1500])
+
+        full_draft_v2 = draft_v2(
+            sentences=[
+                {"text": "탐구 과정에서 자료를 비교함.", "source_ids": ["A1-P1"], "confidence": 0.9}
+            ],
+            omitted_proposition_ids=[],
+            target_byte_range=[1400, 1500],
+            estimated_byte_count=1450,
+            length_exception_reason=None,
+            teacher_evaluation={
+                "competency": "분석력",
+                "support_ids": ["A1-P1"],
+                "expression": "근거와 연결된 평가",
+            },
+        )
+        parsed_v2 = contracts.parse_stage_contract(full_draft_v2, "draft")
+        self.assertEqual(parsed_v2.sentences[0].confidence, 0.9)
 
         full_result = {
             "contract": "EVALUATED_RESULT_V1",
@@ -234,6 +263,63 @@ class ReferentialIntegrityTests(unittest.TestCase):
     def test_draft_matching_facts_passes(self):
         parsed_facts = contracts.parse_stage_contract(facts(), "structure")
         parsed_draft = contracts.parse_stage_contract(draft(), "draft")
+        contracts.validate_draft_against_facts(parsed_draft, parsed_facts)  # 예외 없음
+
+    def test_draft_v1_is_migrated_to_v2_on_parse(self):
+        parsed_draft = contracts.parse_stage_contract(draft(), "draft")
+        self.assertEqual(parsed_draft.contract, "DRAFT_V2")
+        self.assertEqual(len(parsed_draft.sentences), 1)
+        self.assertEqual(parsed_draft.sentences[0].source_ids, ["A1-P1"])
+        self.assertEqual(parsed_draft.used_proposition_ids, ["A1-P1"])
+
+    def test_draft_v2_rejects_empty_sentences(self):
+        with self.assertRaises(ContractValidationError):
+            contracts.parse_stage_contract(draft_v2(sentences=[]), "draft")
+
+    def test_draft_v2_rejects_confidence_out_of_range(self):
+        with self.assertRaises(ContractValidationError):
+            contracts.parse_stage_contract(
+                draft_v2(sentences=[{"text": "x", "source_ids": ["A1-P1"], "confidence": 1.5}]),
+                "draft",
+            )
+
+    def test_used_proposition_ids_dedupes_across_sentences(self):
+        parsed_draft = contracts.parse_stage_contract(
+            draft_v2(
+                sentences=[
+                    {"text": "첫 문장.", "source_ids": ["A1-P1"]},
+                    {"text": "둘째 문장.", "source_ids": ["A1-P1", "A1-P2"]},
+                ]
+            ),
+            "draft",
+        )
+        self.assertEqual(parsed_draft.used_proposition_ids, ["A1-P1", "A1-P2"])
+
+    def test_sentence_evidence_citing_unknown_proposition_is_rejected(self):
+        parsed_facts = contracts.parse_stage_contract(facts(), "structure")
+        parsed_draft = contracts.parse_stage_contract(
+            draft_v2(
+                sentences=[
+                    {"text": "자료를 비교함.", "source_ids": ["A1-P1"]},
+                    {"text": "존재하지 않는 근거.", "source_ids": ["A9-P9"]},
+                ]
+            ),
+            "draft",
+        )
+        with self.assertRaises(ContractValidationError) as ctx:
+            contracts.validate_draft_against_facts(parsed_draft, parsed_facts)
+        self.assertIn("A9-P9", str(ctx.exception))
+
+    def test_sentence_evidence_matching_facts_passes(self):
+        parsed_facts = contracts.parse_stage_contract(facts(), "structure")
+        parsed_draft = contracts.parse_stage_contract(
+            draft_v2(
+                sentences=[
+                    {"text": "자료를 비교함.", "source_ids": ["A1-P1"]},
+                ]
+            ),
+            "draft",
+        )
         contracts.validate_draft_against_facts(parsed_draft, parsed_facts)  # 예외 없음
 
 

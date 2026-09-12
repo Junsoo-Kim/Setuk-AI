@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import posixpath
 import re
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Callable, Literal, Union
 
 from pydantic import (
     AfterValidator,
@@ -207,6 +207,12 @@ class TeacherEvaluation(_Contract):
     expression: str = ""
 
 
+class SentenceEvidence(_Contract):
+    text: str = ""
+    source_ids: list[str] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
 class DraftV1(_Contract):
     contract: Literal["DRAFT_V1"]
     source_path: SafeStudentPath
@@ -218,6 +224,48 @@ class DraftV1(_Contract):
     target_byte_range: list[int] | None = None
     estimated_byte_count: int | None = None
     length_exception_reason: str | None = None
+
+
+class DraftV2(_Contract):
+    contract: Literal["DRAFT_V2"]
+    source_path: SafeStudentPath
+    output_path: SafeOutputPath
+    text: str = Field(min_length=1)
+    sentences: list[SentenceEvidence] = Field(min_length=1)
+    omitted_proposition_ids: list[str] = Field(default_factory=list)
+    teacher_evaluation: TeacherEvaluation | None = None
+    target_byte_range: list[int] | None = None
+    estimated_byte_count: int | None = None
+    length_exception_reason: str | None = None
+
+    @property
+    def used_proposition_ids(self) -> list[str]:
+        seen: list[str] = []
+        for sentence in self.sentences:
+            for proposition_id in sentence.source_ids:
+                if proposition_id not in seen:
+                    seen.append(proposition_id)
+        return seen
+
+
+def _migrate_draft_v1_to_v2(v1: DraftV1) -> DraftV2:
+    return DraftV2(
+        contract="DRAFT_V2",
+        source_path=v1.source_path,
+        output_path=v1.output_path,
+        text=v1.text,
+        sentences=[SentenceEvidence(text=v1.text, source_ids=list(v1.used_proposition_ids))],
+        omitted_proposition_ids=v1.omitted_proposition_ids,
+        teacher_evaluation=v1.teacher_evaluation,
+        target_byte_range=v1.target_byte_range,
+        estimated_byte_count=v1.estimated_byte_count,
+        length_exception_reason=v1.length_exception_reason,
+    )
+
+
+STAGE_MIGRATIONS: dict[str, Callable[[BaseModel], BaseModel]] = {
+    "DRAFT_V1": _migrate_draft_v1_to_v2,
+}
 
 
 class Review(_Contract):
@@ -254,6 +302,7 @@ AnyContract = Annotated[
         StructuredFactsV1,
         NeedsInputV1,
         DraftV1,
+        DraftV2,
         EvaluatedResultV1,
     ],
     Field(discriminator="contract"),
@@ -264,7 +313,7 @@ _ADAPTER: TypeAdapter[Any] = TypeAdapter(AnyContract)
 STAGE_EXPECTATIONS: dict[str, tuple[type[BaseModel], ...]] = {
     "ingest": (ReportIngestedV1, ReportNeedsInputV1),
     "structure": (StructuredFactsV1, NeedsInputV1),
-    "draft": (DraftV1,),
+    "draft": (DraftV1, DraftV2),
     "evaluate": (EvaluatedResultV1,),
     "fix": (EvaluatedResultV1,),
 }
@@ -309,12 +358,14 @@ def parse_stage_contract(data: Any, stage: str) -> BaseModel:
             f"받은 값: {contract_name!r}"
         )
     try:
-        return _ADAPTER.validate_python(data)
+        parsed = _ADAPTER.validate_python(data)
     except ValidationError as exc:
         raise ContractValidationError(format_validation_error(exc)) from exc
+    migrate = STAGE_MIGRATIONS.get(_contract_name(type(parsed)))
+    return migrate(parsed) if migrate is not None else parsed
 
 
-def validate_draft_against_facts(draft: DraftV1, facts: StructuredFactsV1) -> None:
+def validate_draft_against_facts(draft: DraftV2, facts: StructuredFactsV1) -> None:
     """초안이 사실 장부 밖의 명제를 인용하거나 다른 학생 경로로 새지 않았는지 확인한다."""
     known = facts.proposition_ids()
     dangling = [ref for ref in draft.used_proposition_ids if ref not in known]
@@ -323,7 +374,7 @@ def validate_draft_against_facts(draft: DraftV1, facts: StructuredFactsV1) -> No
             f"- used_proposition_ids: STRUCTURED_FACTS_V1에 없는 명제 ID를 인용했습니다: {dangling}. "
             f"사용 가능한 ID: {sorted(known) or '(없음)'}"
         )
-    _assert_same_paths(draft, facts, "DRAFT_V1")
+    _assert_same_paths(draft, facts, "DRAFT_V2")
 
 
 def validate_result_against_facts(result: EvaluatedResultV1, facts: StructuredFactsV1) -> None:

@@ -10,9 +10,15 @@ pyyaml>=6.0,<7
 pydantic>=2.9,<3
 SQLAlchemy>=2.0,<3
 alembic>=1.13,<2
+# 저장 데이터 암호화(EncryptedText/EncryptedJSON, SETUK_DB_ENCRYPTION_KEY)
+cryptography>=41,<51
 psycopg[binary]>=3.2,<4
 # 규정 RAG: 기재요령 PDF 원문에서 페이지 번호를 보존하며 본문을 추출한다.
 pymupdf>=1.24,<2
+
+# 선택: DATABASE_URL이 PostgreSQL일 때만 규정 RAG가 pgvector 컬럼 타입을 쓴다.
+# SQLite 배포(기본값)는 설치하지 않아도 된다.
+# pgvector>=0.2,<1
 # MCP 도구 서버(stdio). Claude Code/Cline 등이 붙는다.
 mcp>=1.2,<2
 

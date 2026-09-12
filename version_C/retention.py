@@ -7,6 +7,7 @@
 | --- | --- | --- |
 | `runs.draft_text` | AI 초안 원문 | 예 |
 | `artifacts.content` | 사실 장부·초안·승인본·최종본 | 예 |
+| `pseudonym_maps.mapping` | 실명 ↔ 별칭 치환표 | 예(학생별 삭제 시) |
 | `audit_logs` | 누가 언제 무엇을 했는지(가명만) | 아니오(기본) |
 
 감사 로그를 기본 보존 대상에서 뺀 이유: 감사 로그는 **삭제 사실 자체를 증명하는**
@@ -28,7 +29,7 @@ from typing import Any
 
 from sqlalchemy import delete, select, update
 
-from .db import Artifact, AuditLog, Database, Review, Run, record_audit, utcnow
+from .db import Artifact, AuditLog, Database, PseudonymMap, Review, Run, record_audit, utcnow
 
 # 0이면 자동 삭제를 하지 않는다. 학교마다 보존 정책이 다르므로 기본값을 강하게 잡지 않는다.
 DEFAULT_RETENTION_DAYS = 0
@@ -141,7 +142,7 @@ def purge_student(
     `student_key`(실명)나 `pseudonym` 중 하나로 지정한다. 화면·API에서는 가명을 쓰는 편이
     안전하다 — 삭제 요청 로그에 실명을 남기지 않아도 되기 때문이다.
 
-    지우는 것: 초안 본문, 산출물, 검토 이력, run 행.
+    지우는 것: 초안 본문, 산출물, 검토 이력, run 행, 가명 매핑.
     남기는 것: 감사 로그(삭제했다는 사실의 증거), `세특/*.md` 결과 파일.
     """
     if not student_key and not pseudonym:
@@ -150,11 +151,19 @@ def purge_student(
     from . import privacy
 
     target = pseudonym or privacy.pseudonym_for(student_key or "")
-    removed = {"runs": 0, "artifacts": 0, "reviews": 0, "audit_logs": 0}
+    removed = {"runs": 0, "artifacts": 0, "reviews": 0, "audit_logs": 0, "pseudonym_maps": 0}
 
     with db.session() as session:
         run_ids = list(
             session.scalars(select(Run.id).where(Run.pseudonym == target)).all()
+        )
+        removed["pseudonym_maps"] = (
+            session.execute(
+                delete(PseudonymMap)
+                .where(PseudonymMap.run_id.in_({*run_ids, target}))
+                .execution_options(synchronize_session=False)
+            ).rowcount
+            or 0
         )
         if run_ids:
             removed["artifacts"] = (

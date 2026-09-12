@@ -24,13 +24,16 @@ from typing import Any
 
 from dotenv import load_dotenv
 from flask import Flask, abort, redirect, render_template_string, request, url_for
+from flask import session as flask_session
 from langgraph.types import Command
 from sqlalchemy import desc, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 
+from . import auth
 from . import db as dbmod
 from . import privacy
+from .auth import admin_required, assert_owner_or_admin, current_username, login_required
 from .checkpointer import open_checkpointer
 from .db import (
     STATUS_AWAITING_REVIEW,
@@ -59,6 +62,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger("setuk.server")
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SETUK_SECRET_KEY") or uuid.uuid4().hex
 
 # 이 프로세스를 가리키는 이름. 리스 소유자를 구분하는 데 쓴다.
 WORKER_ID = f"{os.getpid()}-{uuid.uuid4().hex[:6]}"
@@ -333,12 +337,52 @@ def start_recovery_worker() -> None:
 # --------------------------------------------------------------------------- 라우팅
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        role = auth.verify_login(db, username, password)
+        if role is None:
+            error = "아이디 또는 비밀번호가 올바르지 않습니다."
+        else:
+            flask_session["username"] = username
+            flask_session["role"] = role
+            with db.session() as db_session:
+                record_audit(db_session, action="auth.login", actor=username, detail={"role": role})
+            next_url = request.args.get("next") or url_for("index")
+            return redirect(next_url)
+    return render_template_string(LOGIN_TEMPLATE, error=error)
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    username = current_username()
+    if username:
+        with db.session() as db_session:
+            record_audit(db_session, action="auth.logout", actor=username)
+    flask_session.clear()
+    return redirect(url_for("login"))
+
+
 @app.route("/", methods=["GET"])
+@login_required
 def index():
     with db.session() as session:
-        runs = session.scalars(select(Run).order_by(desc(Run.created_at)).limit(100)).all()
+        query = select(Run).order_by(desc(Run.created_at)).limit(100)
+        if not auth.is_admin():
+            query = select(Run).where(Run.owner == current_username()).order_by(
+                desc(Run.created_at)
+            ).limit(100)
+        runs = session.scalars(query).all()
     return render_template_string(
-        INDEX_TEMPLATE, runs=runs, backend=CHECKPOINT_BACKEND, db_url=_display_url(db.url)
+        INDEX_TEMPLATE,
+        runs=runs,
+        backend=CHECKPOINT_BACKEND,
+        db_url=_display_url(db.url),
+        username=current_username(),
+        is_admin=auth.is_admin(),
     )
 
 
@@ -351,6 +395,7 @@ def _display_url(url: str) -> str:
 
 
 @app.route("/start", methods=["POST"])
+@login_required
 def start():
     student_key = request.form.get("student_key", "").strip()
     mode = request.form.get("mode", "")
@@ -377,6 +422,7 @@ def start():
             id=run_id,
             student_key=student_key,
             pseudonym=privacy.pseudonym_for(student_key),
+            owner=current_username(),
             mode=mode,
             status=STATUS_RUNNING,
             report_path=report_path,
@@ -390,7 +436,7 @@ def start():
         record_audit(
             session,
             action="run.started",
-            actor="teacher",
+            actor=current_username() or "teacher",
             run_id=run_id,
             pseudonym=run.pseudonym,
             detail={
@@ -405,11 +451,13 @@ def start():
 
 
 @app.route("/runs/<run_id>", methods=["GET"])
+@login_required
 def run_detail(run_id: str):
     with db.session() as session:
         run = session.get(Run, run_id)
         if run is None:
             abort(404, "알 수 없는 작업입니다.")
+        assert_owner_or_admin(run.owner)
         reviews = session.scalars(
             select(Review).where(Review.run_id == run_id).order_by(Review.created_at)
         ).all()
@@ -417,6 +465,7 @@ def run_detail(run_id: str):
 
 
 @app.route("/runs/<run_id>/review", methods=["POST"])
+@login_required
 def review(run_id: str):
     action = request.form.get("action")
     if action not in ("approve", "reject"):
@@ -430,6 +479,7 @@ def review(run_id: str):
         run = session.get(Run, run_id)
         if run is None:
             abort(404, "알 수 없는 작업입니다.")
+        assert_owner_or_admin(run.owner)
         if run.status != STATUS_AWAITING_REVIEW:
             abort(409, f"지금은 검토할 수 있는 상태가 아닙니다(현재: {run.status}).")
         if submitted_hash and run.draft_hash and submitted_hash != run.draft_hash:
@@ -475,7 +525,7 @@ def review(run_id: str):
         record_audit(
             session,
             action=f"review.{action}",
-            actor="teacher",
+            actor=current_username() or "teacher",
             run_id=run_id,
             pseudonym=run.pseudonym,
             detail={
@@ -497,12 +547,14 @@ def review(run_id: str):
 
 
 @app.route("/runs/<run_id>/resume", methods=["POST"])
+@login_required
 def resume_interrupted(run_id: str):
     """복구 워커가 회수한 작업을 체크포인트에서 다시 진행시킨다."""
     with db.session() as session:
         run = session.get(Run, run_id)
         if run is None:
             abort(404, "알 수 없는 작업입니다.")
+        assert_owner_or_admin(run.owner)
         if run.status != STATUS_INTERRUPTED:
             abort(409, f"중단 상태인 작업만 재개할 수 있습니다(현재: {run.status}).")
         run.status = STATUS_RUNNING
@@ -511,7 +563,7 @@ def resume_interrupted(run_id: str):
         record_audit(
             session,
             action="run.resumed",
-            actor="teacher",
+            actor=current_username() or "teacher",
             run_id=run_id,
             pseudonym=run.pseudonym,
         )
@@ -522,14 +574,11 @@ def resume_interrupted(run_id: str):
 
 
 def _current_reviewer() -> str:
-    """검토자 식별. 지금은 단일 로컬 사용자이므로 환경변수 또는 고정값을 쓴다.
-
-    학교 단위 배포로 넘어가면 여기가 인증 미들웨어가 붙을 자리다.
-    """
-    return os.environ.get("SETUK_REVIEWER", "local-teacher")
+    return current_username() or os.environ.get("SETUK_REVIEWER", "local-teacher")
 
 
 @app.route("/policy", methods=["GET"])
+@login_required
 def policy_search():
     """규정 검색 화면. 교사가 "이거 써도 되나"를 직접 조회할 수 있게 한다."""
     service = policy_service()
@@ -546,6 +595,7 @@ def policy_search():
 
 
 @app.route("/metrics", methods=["GET"])
+@admin_required
 def metrics_page():
     """Agent/HITL 지표. 모든 비율은 분모와 함께 보여 준다."""
     from . import metrics as metrics_mod
@@ -558,6 +608,7 @@ def metrics_page():
 
 
 @app.route("/privacy", methods=["GET"])
+@admin_required
 def privacy_page():
     """보존 정책과 학생별 삭제 화면."""
     from .retention import load_policy
@@ -576,6 +627,7 @@ def privacy_page():
 
 
 @app.route("/privacy/delete", methods=["POST"])
+@admin_required
 def privacy_delete():
     """학생별 데이터 삭제(계획서: '학생별 데이터 삭제 API').
 
@@ -595,6 +647,7 @@ def privacy_delete():
 
 
 @app.route("/audit", methods=["GET"])
+@admin_required
 def audit():
     with db.session() as session:
         entries = session.scalars(
@@ -627,12 +680,32 @@ _STYLE = """
 </style>
 """
 
+LOGIN_TEMPLATE = """
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>로그인 - Setuk-AI C버전</title>""" + _STYLE + """
+</head><body>
+<h1>Setuk-AI C버전 로그인</h1>
+{% if error %}<div class="warn">{{ error }}</div>{% endif %}
+<form method="post">
+  <label>아이디</label>
+  <input type="text" name="username" required autofocus>
+  <label>비밀번호</label>
+  <input type="password" name="password" required>
+  <button type="submit">로그인</button>
+</form>
+<p class="note">계정이 없으면 관리자에게 요청하세요.
+   (관리자는 <code>python -m version_C.manage_teachers create &lt;아이디&gt;</code>로 만듭니다.)</p>
+</body></html>
+"""
+
 INDEX_TEMPLATE = """
 <!doctype html><html lang="ko"><head><meta charset="utf-8"><title>Setuk-AI C버전</title>""" + _STYLE + """
 </head><body>
+<p style="text-align:right">{{ username }}{% if is_admin %} (관리자){% endif %} ·
+  <form method="post" action="/logout" style="display:inline"><button type="submit">로그아웃</button></form></p>
 <h1>Setuk-AI C버전 &mdash; 자율 멀티에이전트 (Claude API 직접 호출)</h1>
 <p>이 버전은 무설치가 아니며 API 사용량만큼 비용이 발생합니다. 실제 학생 데이터로 쓰기 전에
    <code>학생정보/example.yaml</code> 같은 가상 사례로 먼저 흐름을 확인하세요.</p>
+<p class="note">여기 보이는 작업 목록은 본인이 시작한 것만입니다{% if is_admin %}(관리자는 전체를 봅니다){% endif %}.</p>
 
 <h2>새 작업 시작</h2>
 <form method="post" action="/start">
@@ -664,10 +737,8 @@ INDEX_TEMPLATE = """
 <footer>
   작업 목록 저장소: <span class="mono">{{ db_url }}</span> ·
   체크포인터: <span class="mono">{{ backend }}</span> ·
-  <a href="/audit">감사 로그</a> ·
-  <a href="/policy">규정 검색</a> ·
-  <a href="/metrics">지표</a> ·
-  <a href="/privacy">개인정보</a>
+  <a href="/policy">규정 검색</a>
+  {% if is_admin %} · <a href="/audit">감사 로그</a> · <a href="/metrics">지표</a> · <a href="/privacy">개인정보</a>{% endif %}
 </footer>
 </body></html>
 """
@@ -981,7 +1052,7 @@ PRIVACY_TEMPLATE = """
 </p>
 
 <h2>학생별 데이터 삭제</h2>
-<p>지우는 것: 초안 본문, 산출물, 검토 이력, 작업 기록.<br>
+<p>지우는 것: 초안 본문, 산출물, 검토 이력, 작업 기록, 가명 매핑.<br>
    <strong>지우지 않는 것: <code>세특/&lt;식별자&gt;.md</code> 결과 파일</strong> &mdash;
    교사가 NEIS에 옮겨 적을 산출물이므로 파일 관리는 교사 몫입니다.</p>
 

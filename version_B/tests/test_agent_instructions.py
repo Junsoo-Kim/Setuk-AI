@@ -35,8 +35,9 @@ class AgentInstructionTests(unittest.TestCase):
         self.assertIn("학생정보/<학생명>.yaml", self.ingestion)
         self.assertIn("STRUCTURED_FACTS_V1", self.structuring)
         self.assertIn("STRUCTURED_FACTS_V1", self.drafting)
-        self.assertIn("DRAFT_V1", self.drafting)
+        self.assertIn("DRAFT_V2", self.drafting)
         self.assertIn("STRUCTURED_FACTS_V1", self.evaluation)
+        self.assertIn("DRAFT_V2", self.evaluation)
         self.assertIn("DRAFT_V1", self.evaluation)
         self.assertIn("EVALUATED_RESULT_V1", self.evaluation)
 

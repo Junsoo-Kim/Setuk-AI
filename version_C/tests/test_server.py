@@ -53,6 +53,12 @@ class ServerTestCase(unittest.TestCase):
         with server.db.session() as session:
             for table in ("audit_logs", "artifacts", "reviews", "runs"):
                 session.execute(__import__("sqlalchemy").text(f"DELETE FROM {table}"))
+        self.login_as("test-admin", "admin")
+
+    def login_as(self, username: str, role: str) -> None:
+        with self.client.session_transaction() as flask_session:
+            flask_session["username"] = username
+            flask_session["role"] = role
 
 
 class ServerRoutingTests(ServerTestCase):
@@ -212,7 +218,7 @@ class ReviewIdempotencyTests(ServerTestCase):
         )
         with server.db.session() as session:
             review = session.scalars(select(Review).where(Review.run_id == "audit-1")).one()
-        self.assertEqual(review.reviewer, "local-teacher")
+        self.assertEqual(review.reviewer, "test-admin")
         self.assertTrue(review.edited)
         self.assertIsNotNone(review.approved_at)
         self.assertEqual(review.approved_hash, privacy.content_hash("교사가 고친 초안"))
@@ -459,6 +465,89 @@ class AuditLogTests(ServerTestCase):
         self.assertIn("run.completed", page)
         self.assertIn(privacy.pseudonym_for("홍길동"), page)
         self.assertNotIn("홍길동", page)
+
+
+class RbacTests(ServerTestCase):
+    def test_anonymous_request_is_redirected_to_login(self):
+        with self.client.session_transaction() as flask_session:
+            flask_session.clear()
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login", response.headers["Location"])
+
+    def test_teacher_cannot_open_another_teachers_run(self):
+        with server.db.session() as session:
+            session.add(make_run("owned-by-a", owner="teacher-a"))
+        self.login_as("teacher-b", "teacher")
+        response = self.client.get("/runs/owned-by-a")
+        self.assertEqual(response.status_code, 403)
+
+    def test_teacher_can_open_their_own_run(self):
+        with server.db.session() as session:
+            session.add(make_run("owned-by-a", owner="teacher-a"))
+        self.login_as("teacher-a", "teacher")
+        response = self.client.get("/runs/owned-by-a")
+        self.assertEqual(response.status_code, 200)
+
+    def test_teacher_only_sees_their_own_runs_in_the_list(self):
+        with server.db.session() as session:
+            session.add(make_run("owned-by-a", owner="teacher-a", student_key="학생A"))
+            session.add(make_run("owned-by-b", owner="teacher-b", student_key="학생B"))
+        self.login_as("teacher-a", "teacher")
+        body = self.client.get("/").get_data(as_text=True)
+        self.assertIn("학생A", body)
+        self.assertNotIn("학생B", body)
+
+    def test_admin_sees_every_run(self):
+        with server.db.session() as session:
+            session.add(make_run("owned-by-a", owner="teacher-a", student_key="학생A"))
+            session.add(make_run("owned-by-b", owner="teacher-b", student_key="학생B"))
+        self.login_as("the-admin", "admin")
+        body = self.client.get("/").get_data(as_text=True)
+        self.assertIn("학생A", body)
+        self.assertIn("학생B", body)
+
+    def test_teacher_cannot_reach_admin_only_pages(self):
+        self.login_as("teacher-a", "teacher")
+        for path in ("/metrics", "/privacy", "/audit"):
+            self.assertEqual(self.client.get(path).status_code, 403)
+
+    def test_real_login_flow_sets_the_session_and_redirects(self):
+        from version_C import auth
+
+        with self.client.session_transaction() as flask_session:
+            flask_session.clear()
+        auth.create_teacher(server.db, "real-login-teacher", "password123", role="teacher")
+        response = self.client.post(
+            "/login", data={"username": "real-login-teacher", "password": "password123"}
+        )
+        self.assertEqual(response.status_code, 302)
+        with self.client.session_transaction() as flask_session:
+            self.assertEqual(flask_session["username"], "real-login-teacher")
+            self.assertEqual(flask_session["role"], "teacher")
+
+    def test_real_login_flow_rejects_the_wrong_password(self):
+        from version_C import auth
+
+        with self.client.session_transaction() as flask_session:
+            flask_session.clear()
+        auth.create_teacher(server.db, "real-login-teacher-2", "password123", role="teacher")
+        response = self.client.post(
+            "/login", data={"username": "real-login-teacher-2", "password": "wrong"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("올바르지 않습니다", response.get_data(as_text=True))
+
+    def test_teacher_cannot_review_another_teachers_run(self):
+        with server.db.session() as session:
+            session.add(
+                make_run("owned-by-a", owner="teacher-a", status=STATUS_AWAITING_REVIEW)
+            )
+        self.login_as("teacher-b", "teacher")
+        response = self.client.post(
+            "/runs/owned-by-a/review", data={"action": "approve"}
+        )
+        self.assertEqual(response.status_code, 403)
 
 
 def tearDownModule():
