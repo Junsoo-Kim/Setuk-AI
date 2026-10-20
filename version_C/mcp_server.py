@@ -56,6 +56,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from .mcp_tools import (
+    HUMAN_GATED_TOOLS,
     ToolContext,
     ToolError,
     call_tool,
@@ -150,6 +151,11 @@ def build_server(context: ToolContext | None = None):
         MCP 사양상 그것이 **모델이 읽고 스스로 고칠 수 있는** 오류 보고 방식이다
         (프로토콜 오류로 올리면 모델에게 닿지 않는다).
         """
+        if name in HUMAN_GATED_TOOLS:
+            result = await _handle_human_gated(server, name, arguments or {}, context)
+            text = json.dumps(result, ensure_ascii=False, indent=1, default=str)
+            return [TextContent(type="text", text=text)], result
+
         timeout = tool_timeout_seconds()
         try:
             # 도구는 동기 함수다. 파일·DB I/O가 이벤트 루프를 막지 않도록 스레드로 보낸다.
@@ -171,6 +177,46 @@ def build_server(context: ToolContext | None = None):
 
     _register_resources_and_prompts(server, context)
     return server
+
+
+async def _handle_human_gated(server, name: str, arguments: dict[str, Any], context: ToolContext):
+    """사람에게 직접 묻는 도구(`request_teacher_review`).
+
+    도구 타임아웃을 걸지 않는다 — 교사가 초안을 읽고 답하는 데 몇 분이 걸릴 수 있다.
+    호출 상한과 감사 로그는 다른 도구와 같다.
+    """
+    from . import mcp_tools
+    from .review_elicitation import request_teacher_review
+
+    context.charge(name)
+    run_id = arguments.get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip() or set(arguments) - {"run_id"}:
+        context.record(name, {"outcome": "error", "kind": "bad_arguments"})
+        raise ToolError("run_id 하나만 받습니다. 결정은 교사가 대화창에서 고릅니다.")
+
+    session = server.request_context.session
+    params = getattr(session, "client_params", None)
+    capabilities = getattr(params, "capabilities", None)
+    client_info = getattr(params, "clientInfo", None)
+
+    async def elicit(message: str, schema: dict[str, Any]):
+        return await session.elicit(message=message, requestedSchema=schema)
+
+    try:
+        result = await request_teacher_review(
+            run_id,
+            database=mcp_tools._default_database(),
+            elicit=elicit,
+            supports_elicitation=getattr(capabilities, "elicitation", None) is not None,
+            client_name=getattr(client_info, "name", None) or "unknown",
+        )
+    except ToolError:
+        context.record(name, {"outcome": "error", "kind": "ToolError"})
+        raise
+    context.record(
+        name, {"outcome": "ok", "recorded": result["recorded"], "elicitation": result["outcome"]}
+    )
+    return result
 
 
 def _register_resources_and_prompts(server, context: ToolContext) -> None:

@@ -561,3 +561,54 @@ def tearDownModule():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SubmittedReviewPickupTests(ServerTestCase):
+    """MCP elicitation으로 기록된 결정을 웹 서버가 집어 그래프를 재개한다."""
+
+    def _submitted_run(self, run_id: str, decision: str, reason: str | None = None) -> None:
+        from version_C.db import STATUS_REVIEW_SUBMITTED
+
+        draft = "검토 대상 초안."
+        draft_hash = privacy.content_hash(draft)
+        with server.db.session() as session:
+            session.add(
+                make_run(run_id, status=STATUS_REVIEW_SUBMITTED, draft_text=draft, draft_hash=draft_hash)
+            )
+            session.flush()
+            session.add(
+                Review(
+                    run_id=run_id,
+                    idempotency_key=f"elicit-{decision}-{draft_hash}",
+                    decision=decision,
+                    reviewer="mcp-elicitation:test",
+                    reason=reason,
+                    draft_hash=draft_hash,
+                )
+            )
+
+    def test_pickup_tick_resumes_the_graph_with_the_recorded_decision(self):
+        from unittest.mock import patch
+
+        self._submitted_run("mcp-approved", "approve")
+        started: list = []
+        with patch.object(server, "_start_worker", lambda *args, **kw: started.append((args, kw))):
+            server._review_pickup_tick()
+            server._review_pickup_tick()  # 두 번째 주기는 같은 결정을 다시 집지 않는다
+
+        self.assertEqual(
+            started, [(("mcp-approved", {"approved": True, "edited_text": ""}), {"resume": True})]
+        )
+        with server.db.session() as session:
+            self.assertEqual(session.get(Run, "mcp-approved").status, STATUS_RUNNING)
+
+    def test_detail_page_explains_the_submitted_state(self):
+        self._submitted_run("mcp-pending", "reject", reason="동기 보강")
+        response = self.client.get("/runs/mcp-pending")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("MCP", response.get_data(as_text=True))
+
+    def test_web_review_is_rejected_once_a_decision_was_submitted_via_mcp(self):
+        self._submitted_run("mcp-done", "approve")
+        response = self.client.post("/runs/mcp-done/review", data={"action": "reject", "reason": "x"})
+        self.assertEqual(response.status_code, 409)

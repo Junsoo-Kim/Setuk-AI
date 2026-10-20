@@ -158,7 +158,7 @@ class McpToolbox:
 
 
 @asynccontextmanager
-async def _connect_in_memory(server):
+async def _connect_in_memory(server, **client_kwargs):
     """서버와 클라이언트 세션을 메모리 스트림으로 잇고 initialize 결과까지 돌려준다.
 
     SDK의 `create_connected_server_and_client_session`과 같은 구성이지만, 그 헬퍼는
@@ -176,7 +176,7 @@ async def _connect_in_memory(server):
                 server.run, server_read, server_write, server.create_initialization_options()
             )
             try:
-                async with ClientSession(client_read, client_write) as session:
+                async with ClientSession(client_read, client_write, **client_kwargs) as session:
                     init = await session.initialize()
                     yield session, init
             finally:

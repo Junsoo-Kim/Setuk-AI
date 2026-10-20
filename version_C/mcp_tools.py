@@ -95,6 +95,11 @@ def tool_timeout_seconds() -> float:
 # 부작용이 있는 도구. 나머지는 전부 읽기 전용이다.
 WRITE_TOOLS = frozenset({"submit_review"})
 
+# 사람에게 직접 물어야만 실행되는 도구(MCP elicitation). 결정은 모델이 아니라 사람이 하므로
+# 환경변수 허용 없이 열지만, 사용자 확인 채널이 있는 MCP 세션에서만 동작한다
+# (`mcp_server.py`가 가로채 `review_elicitation.py`로 보낸다).
+HUMAN_GATED_TOOLS = frozenset({"request_teacher_review"})
+
 
 class ToolError(Exception):
     """도구 호출이 거부되거나 실패했다. 메시지는 그대로 모델에게 돌아간다."""
@@ -435,6 +440,18 @@ def tool_submit_review(
         }
 
 
+def tool_request_teacher_review(run_id: str, **_: Any) -> dict[str, Any]:
+    """사용자 확인 채널 없이 불렸을 때의 경로. 항상 거부한다.
+
+    실제 처리는 MCP 세션이 있는 `mcp_server.py`가 elicitation으로 한다. 이 함수가 결정을
+    추측하거나 기본값으로 기록하는 일은 없다.
+    """
+    raise ToolError(
+        "request_teacher_review는 MCP elicitation으로 교사에게 직접 묻는 도구라 "
+        "사용자 확인 채널이 있는 MCP 세션에서만 실행됩니다. 웹 화면에서 검토하세요."
+    )
+
+
 def _default_database():
     from .db import Database
 
@@ -458,6 +475,7 @@ TOOL_FUNCTIONS: dict[str, Callable[..., dict[str, Any]]] = {
     "get_run_status": tool_get_run_status,
     "get_evidence_for_sentence": tool_get_evidence_for_sentence,
     "submit_review": tool_submit_review,
+    "request_teacher_review": tool_request_teacher_review,
 }
 
 TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
@@ -696,6 +714,32 @@ TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
     },
+    "request_teacher_review": {
+        "description": (
+            "검토 대기 중인 초안을 교사에게 직접 보여 주고 승인·반려를 묻는다(MCP elicitation). "
+            "결정은 교사가 대화창에서 고르며, 이 도구의 인자로는 결정을 넘길 수 없다. "
+            "elicitation을 지원하지 않는 클라이언트에서는 거부된다."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"run_id": {"type": "string", "description": "검토 대기 중인 작업 ID"}},
+            "required": ["run_id"],
+            "additionalProperties": False,
+        },
+        "outputSchema": {
+            "type": "object",
+            "properties": {
+                "run_id": {"type": "string"},
+                "draft_hash": {"type": ["string", "null"]},
+                "decision": {"type": "string"},
+                "recorded": {"type": "boolean"},
+                "outcome": {"type": "string"},
+                "note": {"type": "string"},
+            },
+            "required": ["run_id", "recorded", "outcome"],
+            "additionalProperties": False,
+        },
+    },
 }
 
 
@@ -703,9 +747,9 @@ def describe_tools() -> list[dict[str, Any]]:
     """MCP tools/list에 실을 정의. 쓰기 도구는 이름에 표시가 붙는다."""
     described = []
     for name, schema in TOOL_SCHEMAS.items():
-        is_write = name in WRITE_TOOLS
+        is_write = name in WRITE_TOOLS or name in HUMAN_GATED_TOOLS
         description = schema["description"]
-        if is_write and not write_tools_enabled():
+        if name in WRITE_TOOLS and not write_tools_enabled():
             description += " (현재 비활성화됨: SETUK_MCP_ALLOW_WRITE 미설정)"
         described.append(
             {

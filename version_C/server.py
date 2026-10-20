@@ -47,6 +47,7 @@ from .db import (
     Review,
     Run,
     claim_lease,
+    claim_submitted_reviews,
     record_audit,
     recover_stale_runs,
     release_lease,
@@ -67,6 +68,9 @@ app.secret_key = os.environ.get("SETUK_SECRET_KEY") or uuid.uuid4().hex
 # 이 프로세스를 가리키는 이름. 리스 소유자를 구분하는 데 쓴다.
 WORKER_ID = f"{os.getpid()}-{uuid.uuid4().hex[:6]}"
 RECOVERY_INTERVAL_SECONDS = 60
+# MCP elicitation으로 기록된 교사 결정을 확인하는 주기. 교사가 Claude Code에서 승인한 뒤
+# 체감 대기가 길지 않도록 리스 회수 주기보다 짧게 둔다(쿼리 하나라 부담이 적다).
+REVIEW_PICKUP_INTERVAL_SECONDS = 5
 
 _stack = ExitStack()
 atexit.register(_stack.close)
@@ -325,6 +329,26 @@ def _retention_tick() -> None:
         logger.info("보존 기간이 지난 데이터를 정리했습니다: %s", removed)
 
 
+def _review_pickup_tick() -> None:
+    """MCP elicitation으로 기록된 교사 결정을 집어 그래프를 재개한다.
+
+    MCP 서버는 결정만 기록한다(`review_elicitation.py`). 체크포인트·리스·결과 반영을 가진
+    이 프로세스가 실행을 맡는다. 상태 전이가 낙관적 잠금이라 같은 결정은 한 번만 재개된다.
+    """
+    for run_id, payload in claim_submitted_reviews(db, WORKER_ID):
+        logger.info("MCP로 기록된 검토 결정을 이어서 실행합니다: run=%s", run_id)
+        _start_worker(run_id, payload, resume=True)
+
+
+def _review_pickup_loop() -> None:
+    while True:
+        time.sleep(REVIEW_PICKUP_INTERVAL_SECONDS)
+        try:
+            _review_pickup_tick()
+        except Exception:  # 인계 워커가 서버를 죽이면 안 된다
+            logger.exception("검토 결정 인계 오류")
+
+
 def start_recovery_worker() -> None:
     _recovery_tick()  # 기동 시 지난 프로세스가 남긴 작업을 즉시 정리
     try:
@@ -332,6 +356,11 @@ def start_recovery_worker() -> None:
     except Exception:  # 보존 정책 오류가 서버 기동을 막지 않게 한다
         logger.exception("보존 기간 정리 실패")
     threading.Thread(target=_recovery_loop, daemon=True).start()
+    try:
+        _review_pickup_tick()  # 서버가 꺼져 있던 동안 MCP로 들어온 결정
+    except Exception:
+        logger.exception("검토 결정 인계 실패")
+    threading.Thread(target=_review_pickup_loop, daemon=True).start()
 
 
 # --------------------------------------------------------------------------- 라우팅
@@ -671,6 +700,7 @@ _STYLE = """
   .status-error, .status-lint_failed { background: #f8d7da; }
   .status-interrupted { background: #e2e3e5; }
   .status-needs_input { background: #ffe5d0; }
+  .status-review_submitted { background: #cfe2ff; }
   table { border-collapse: collapse; width: 100%; } td, th { border-bottom: 1px solid #ddd; padding: 6px; text-align: left; vertical-align: top; }
   .warn { color: #842029; background: #f8d7da; padding: 10px; border-radius: 6px; }
   .note { background: #f1f3f5; padding: 10px; border-radius: 6px; font-size: 0.9rem; }
@@ -745,7 +775,7 @@ INDEX_TEMPLATE = """
 
 RUN_TEMPLATE = """
 <!doctype html><html lang="ko"><head><meta charset="utf-8"><title>{{ run.student_key }} - Setuk-AI C버전</title>
-{% if run.status == "running" %}<meta http-equiv="refresh" content="3">{% endif %}
+{% if run.status in ("running", "review_submitted") %}<meta http-equiv="refresh" content="3">{% endif %}
 """ + _STYLE + """
 </head><body>
 <p><a href="/">&larr; 목록으로</a></p>
@@ -761,6 +791,12 @@ RUN_TEMPLATE = """
 
 {% if run.status == "running" %}
   <p>AI가 처리 중입니다. 이 페이지는 3초마다 자동으로 새로고침됩니다.</p>
+
+{% elif run.status == "review_submitted" %}
+  <div class="note">
+    <p>교사가 MCP 클라이언트(Claude Code 등)의 검토 대화창에서 결정을 내렸습니다.
+       서버가 곧 이어서 진행합니다. 결정 내역은 아래 검토 이력에서 확인할 수 있습니다.</p>
+  </div>
 
 {% elif run.status == "awaiting_review" %}
   <h2>초안 검토</h2>
