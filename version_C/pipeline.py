@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Protocol, TypedDict
@@ -206,6 +207,23 @@ def _needs_input(
             "problems": problems,
         }
     }
+
+
+@contextmanager
+def _stage_toolbox(stage: str):
+    """이 단계 에이전트가 쓸 MCP 도구 상자(`agent_tools.STAGE_TOOLS`). 없으면 None.
+
+    도구는 이 프로세스 안에 띄운 Setuk MCP 서버를 MCP 프로토콜로 거친다. 외부 IDE가 쓰는
+    것과 같은 서버라서 경로 제한·호출 상한·결과 크기 제한이 그대로 적용된다.
+    """
+    from .agent_tools import open_toolbox
+
+    toolbox = open_toolbox(stage)
+    try:
+        yield toolbox
+    finally:
+        if toolbox is not None:
+            toolbox.close()
 
 
 def _merge_metrics(state: PipelineState, tracker: CallMetrics) -> list[dict[str, Any]]:
@@ -428,14 +446,16 @@ def node_draft(state: PipelineState, config: RunnableConfig | None = None) -> di
             contracts.validate_draft_against_facts(contract, facts)
 
     try:
-        contract = request_contract(
-            system_prompt,
-            user_content,
-            load_config(),
-            "draft",
-            extra_validator=check,
-            metrics=tracker,
-        )
+        with _stage_toolbox("draft") as toolbox:
+            contract = request_contract(
+                system_prompt,
+                user_content,
+                load_config(),
+                "draft",
+                extra_validator=check,
+                metrics=tracker,
+                toolbox=toolbox,
+            )
     except (ContractParseError, ContractValidationError) as exc:
         return {
             **_needs_input("03_drafting", "contract_validation", problems=str(exc)),
@@ -513,14 +533,16 @@ def node_evaluate(state: PipelineState, config: RunnableConfig | None = None) ->
             contracts.validate_result_against_facts(contract, facts)
 
     try:
-        contract = request_contract(
-            system_prompt,
-            user_content,
-            load_config(),
-            "evaluate",
-            extra_validator=check,
-            metrics=tracker,
-        )
+        with _stage_toolbox("evaluate") as toolbox:
+            contract = request_contract(
+                system_prompt,
+                user_content,
+                load_config(),
+                "evaluate",
+                extra_validator=check,
+                metrics=tracker,
+                toolbox=toolbox,
+            )
     except (ContractParseError, ContractValidationError) as exc:
         return {
             **_needs_input("04_evaluation", "contract_validation", problems=str(exc)),
@@ -655,9 +677,10 @@ def node_fix(state: PipelineState, config: RunnableConfig | None = None) -> dict
         " 필드(수정된 전체 본문)를 포함해 응답하라."
     )
     try:
-        contract = request_contract(
-            system_prompt, user_content, load_config(), "fix", metrics=tracker
-        )
+        with _stage_toolbox("fix") as toolbox:
+            contract = request_contract(
+                system_prompt, user_content, load_config(), "fix", metrics=tracker, toolbox=toolbox
+            )
     except (ContractParseError, ContractValidationError) as exc:
         return {
             **_needs_input("04_evaluation(fix)", "contract_validation", problems=str(exc)),

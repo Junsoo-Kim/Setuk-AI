@@ -96,13 +96,18 @@ def _audit_sink(session_id: str):
     return record
 
 
-def build_server():
-    """MCP SDK 서버 인스턴스를 만든다."""
+def build_server(context: ToolContext | None = None):
+    """MCP SDK 서버 인스턴스를 만든다.
+
+    `context`를 주면 그 세션 상태(호출 상한·감사 로그 대상)를 쓴다. 파이프라인 내부
+    에이전트(`agent_tools.McpToolbox`)가 감사 로그를 자기 실행에 묶을 때 쓴다.
+    """
     from mcp.server import Server
     from mcp.types import TextContent, Tool
 
-    session_id = uuid.uuid4().hex[:12]
-    context = ToolContext(session_id=session_id, audit=_audit_sink(session_id))
+    if context is None:
+        session_id = uuid.uuid4().hex[:12]
+        context = ToolContext(session_id=session_id, audit=_audit_sink(session_id))
     # version을 넘기지 않으면 SDK 버전이 서버 버전으로 보고된다.
     server = Server(
         SERVER_NAME,

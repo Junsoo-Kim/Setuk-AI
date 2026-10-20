@@ -343,6 +343,38 @@ B버전은 IDE 에이전트가 `AGENTS.md`를 읽고 **자연어 지시로 파�
 MCP 사양도 신뢰된 서버가 아니면 tool annotation을 믿지 말라고 명시한다. 이 서버의
 `readOnlyHint`도 힌트일 뿐이고, 실제 강제는 `call_tool`의 정책 검사가 한다.
 
+### 파이프라인 에이전트도 같은 MCP 서버를 쓴다
+
+외부 IDE만 MCP를 쓰는 것이 아니다. 초안(`draft`)·평가(`evaluate`)·수정(`fix`) 단계의
+에이전트는 `agent_tools.McpToolbox`로 **같은 MCP 서버에 MCP 클라이언트로 붙어** 작업 중에
+도구를 스스로 고른다 — 규정이 애매하면 `search_school_policy`로 근거 조항을 찾고, 제출 전에
+`lint_record`로 자기 초안을 검사한다. 도구 목록은 `tools/list`, 실행은 `tools/call`로 받으므로
+경로 제한·호출 상한·결과 크기 제한·타임아웃이 외부 클라이언트와 똑같이 적용된다.
+
+```
+LangGraph 노드 ─ llm.call_agent (tool-use 루프) ─ Claude API
+                      │ tool_use / tool_result
+                      ▼
+              McpToolbox (MCP 클라이언트) ─ 인메모리 JSON-RPC ─ Setuk MCP 서버(build_server)
+                                                                 ▲
+                                          Claude Code / Cline ─ stdio ┘
+```
+
+- **전송**: Messages API의 MCP 커넥터는 원격(URL) 서버만 받는다. 이 서버는 학생 데이터가 있는
+  로컬 프로세스여야 하므로 같은 프로세스에 띄우고 인메모리 스트림으로 연결한다(핸드셰이크와
+  메시지는 stdio와 같다).
+- **단계별 최소 권한** (`agent_tools.STAGE_TOOLS`): 허용되지 않은 도구는 모델에게 보이지 않고,
+  이름을 지어내 불러도 서버에 닿기 전에 `is_error` 결과로 거부된다. 실명이 든 원본을 돌려주는
+  `extract_docx`·`validate_student_yaml`은 파이프라인의 가명화를 우회하므로 어떤 단계에도 주지
+  않는다. `submit_review`도 주지 않는다.
+- **루프 상한** (`llm.MAX_TOOL_ROUNDS` = 6): 넘으면 `tool_choice: none`으로 도구를 끄고 답을 받는다.
+- **서버 안내문**: MCP initialize 결과의 `instructions`가 에이전트 시스템 프롬프트에 덧붙는다.
+- **기록**: 단계별 `metrics[].tool_calls`에 도구 이름과 실패 여부만 남는다(인자는 남기지 않음).
+- **끄기**: `SETUK_AGENT_TOOLS=0`이면 도구 없이 단계마다 한 번 호출하던 이전 방식으로 돌아간다.
+
+구조화(`structure`) 단계에는 도구를 주지 않는다. 그 단계는 원본 학생 자료를 사실 명제로 옮기는
+일이라 외부 근거가 필요 없고, 도구가 있으면 원본 밖의 내용이 섞일 여지만 생긴다.
+
 ## 보존 기간과 학생별 삭제
 
 교육 데이터는 목적을 다한 뒤에도 남아 있으면 그 자체가 위험이다. 브라우저에서 `/privacy`로

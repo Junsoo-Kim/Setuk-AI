@@ -28,6 +28,8 @@ _YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n(.*?)```", re.DOTALL)
 
 DEFAULT_MODEL = "claude-opus-5"
 MAX_REPAIR_ATTEMPTS = 1
+# 한 번의 계약 요청 안에서 도구 실행을 몇 라운드까지 허용할지. 넘으면 도구를 끄고 답을 받는다.
+MAX_TOOL_ROUNDS = 6
 
 logger = logging.getLogger("setuk.llm")
 
@@ -55,6 +57,8 @@ class CallMetrics:
     latency_ms: int = 0
     parse_failures: list[str] = field(default_factory=list)
     response_hashes: list[str] = field(default_factory=list)
+    # 에이전트가 MCP로 부른 도구(이름과 실패 여부만, 인자는 남기지 않는다).
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
     def as_detail(self) -> dict[str, Any]:
         return {
@@ -66,6 +70,7 @@ class CallMetrics:
             "latency_ms": self.latency_ms,
             "parse_failures": self.parse_failures,
             "response_hashes": self.response_hashes,
+            "tool_calls": self.tool_calls,
         }
 
 
@@ -90,27 +95,84 @@ def response_fingerprint(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def call_agent(system_prompt: str, user_content: str, config: LLMConfig) -> str:
+def _anthropic_client(config: LLMConfig):
     from anthropic import Anthropic
 
-    client = Anthropic(api_key=config.api_key)
-    response = client.messages.create(
-        model=config.model,
-        max_tokens=config.max_tokens,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_content}],
-    )
+    return Anthropic(api_key=config.api_key)
+
+
+def _add_usage(response: Any) -> None:
     usage = getattr(response, "usage", None)
     if usage is not None:
-        _LAST_USAGE["input_tokens"] = getattr(usage, "input_tokens", 0) or 0
-        _LAST_USAGE["output_tokens"] = getattr(usage, "output_tokens", 0) or 0
+        _LAST_USAGE["input_tokens"] += getattr(usage, "input_tokens", 0) or 0
+        _LAST_USAGE["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
+
+
+def call_agent(system_prompt: str, user_content: str, config: LLMConfig, toolbox=None) -> str:
+    """모델을 호출해 최종 텍스트를 돌려준다.
+
+    `toolbox`(`agent_tools.McpToolbox`)가 있으면 tool-use 루프를 돈다. 모델이 MCP 도구를
+    부르면 MCP 세션으로 실행해 결과를 돌려주고, 모델이 도구 없이 답할 때까지 반복한다.
+    `MAX_TOOL_ROUNDS`를 넘으면 `tool_choice: none`으로 도구를 끄고 답을 받는다 — 같은
+    도구를 계속 부르는 루프가 비용을 무한정 쓰지 않게 한다.
+    """
+    client = _anthropic_client(config)
+    _LAST_USAGE["input_tokens"] = 0
+    _LAST_USAGE["output_tokens"] = 0
+    _LAST_TOOL_CALLS.clear()
+
+    request: dict[str, Any] = {
+        "model": config.model,
+        "max_tokens": config.max_tokens,
+        "system": system_prompt,
+    }
+    if toolbox is not None:
+        request["tools"] = toolbox.anthropic_tools()
+        if toolbox.instructions:
+            request["system"] = f"{system_prompt}\n\n## 도구 사용 원칙\n{toolbox.instructions}"
+
+    messages: list[dict[str, Any]] = [{"role": "user", "content": user_content}]
+    rounds = 0
+    while True:
+        extra: dict[str, Any] = {}
+        if toolbox is not None and rounds >= MAX_TOOL_ROUNDS:
+            extra["tool_choice"] = {"type": "none"}
+        response = client.messages.create(**request, **extra, messages=messages)
+        _add_usage(response)
+
+        tool_uses = [
+            block for block in response.content if getattr(block, "type", None) == "tool_use"
+        ]
+        if toolbox is None or response.stop_reason != "tool_use" or not tool_uses:
+            break
+
+        rounds += 1
+        # 받은 content를 그대로 이어 붙인다(append-only). thinking 블록도 함께 보존된다.
+        messages.append({"role": "assistant", "content": response.content})
+        results = []
+        for block in tool_uses:
+            outcome = toolbox.call(block.name, dict(block.input or {}))
+            _LAST_TOOL_CALLS.append({"name": block.name, "is_error": outcome.is_error})
+            result: dict[str, Any] = {
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": outcome.text,
+            }
+            if outcome.is_error:
+                result["is_error"] = True
+            results.append(result)
+        # 병렬 호출의 결과는 한 user 메시지에 모아 보낸다.
+        messages.append({"role": "user", "content": results})
+
     return "".join(
         block.text for block in response.content if getattr(block, "type", None) == "text"
     )
 
 
-# call_agent를 테스트에서 통째로 대체할 수 있어야 하므로 토큰 수는 모듈 변수로 받는다.
+# call_agent를 테스트에서 통째로 대체할 수 있어야 하므로 토큰 수와 도구 호출 기록은
+# 모듈 변수로 받는다.
 _LAST_USAGE: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+_LAST_TOOL_CALLS: list[dict[str, Any]] = []
 
 
 def parse_contract(raw_text: str) -> dict[str, Any]:
@@ -155,12 +217,16 @@ def request_contract(
     agent: Callable[[str, str, LLMConfig], str] | None = None,
     extra_validator: Callable[[BaseModel], None] | None = None,
     metrics: CallMetrics | None = None,
+    toolbox=None,
 ) -> BaseModel:
     """계약을 요청하고 검증한다. 형식 실패 시 최대 1회 repair 프롬프트를 보낸다.
 
     `extra_validator`는 단계 간 정합성(명제 ID 참조, 경로 일치)처럼 스키마만으로는
     확인할 수 없는 검증을 넣는 자리다. 여기서 던진 `ContractValidationError`도
     repair 대상이 된다 — 모델이 스스로 고칠 수 있는 종류의 오류이기 때문이다.
+
+    `toolbox`가 있으면 모델이 MCP 도구를 쓰며 계약을 만든다. 도구 호출 기록은
+    `metrics.tool_calls`에 쌓인다.
     """
     invoke = agent or call_agent
     tracker = metrics or CallMetrics(stage=stage)
@@ -171,7 +237,12 @@ def request_contract(
         started = time.monotonic()
         _LAST_USAGE["input_tokens"] = 0
         _LAST_USAGE["output_tokens"] = 0
-        raw = invoke(system_prompt, prompt, config)
+        _LAST_TOOL_CALLS.clear()
+        if toolbox is None:
+            raw = invoke(system_prompt, prompt, config)
+        else:
+            raw = invoke(system_prompt, prompt, config, toolbox=toolbox)
+        tracker.tool_calls.extend(_LAST_TOOL_CALLS)
         tracker.attempts += 1
         tracker.latency_ms += int((time.monotonic() - started) * 1000)
         tracker.input_tokens += _LAST_USAGE["input_tokens"]
