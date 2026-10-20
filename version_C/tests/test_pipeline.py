@@ -45,9 +45,12 @@ class FakeAgent:
     def __init__(self, responses: list[str]):
         self._responses = list(responses)
         self.calls: list[tuple[str, str]] = []
+        # 호출마다 받은 MCP 도구 상자(없으면 None). 도구는 실제로 쓰지 않는다.
+        self.toolboxes: list = []
 
-    def __call__(self, system_prompt: str, user_content: str, config) -> str:
+    def __call__(self, system_prompt: str, user_content: str, config, toolbox=None) -> str:
         self.calls.append((system_prompt[:20], user_content))
+        self.toolboxes.append(toolbox)
         if not self._responses:
             raise AssertionError("예상보다 call_agent가 더 많이 호출되었습니다.")
         return self._responses.pop(0)
@@ -175,6 +178,9 @@ class HappyPathTests(unittest.TestCase):
             saved = (tmp_root / "세특" / "테스트.md").read_text(encoding="utf-8")
             self.assertEqual(saved, VALID_DRAFT_TEXT)
             self.assertEqual(len(agent.calls), 3)
+            # structure는 도구 없이, draft·evaluate는 단계별 MCP 도구 상자를 받는다.
+            self.assertIsNone(agent.toolboxes[0])
+            self.assertEqual([box.stage for box in agent.toolboxes[1:]], ["draft", "evaluate"])
 
     def test_teacher_edit_at_review_overrides_model_draft(self):
         edited = "교사가 직접 고친 최종 문장."

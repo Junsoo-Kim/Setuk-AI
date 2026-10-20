@@ -132,6 +132,9 @@ STATUS_INTERRUPTED = "interrupted"
 # 모델이 정보 부족을 선언했거나, 계약 복구가 실패해 사람이 봐야 하는 상태.
 # `error`(코드가 처리할 수 없는 고장)와 구분한다 — 이쪽은 교사가 입력을 채우면 풀린다.
 STATUS_NEEDS_INPUT = "needs_input"
+# 교사가 웹 화면 밖(MCP elicitation)에서 결정을 내렸고, 웹 서버가 그래프를 재개하기를
+# 기다리는 상태. 결정 채널과 실행 주체를 분리하기 위해 둔다(`claim_submitted_reviews`).
+STATUS_REVIEW_SUBMITTED = "review_submitted"
 
 TERMINAL_STATUSES = frozenset(
     {STATUS_DONE, STATUS_LINT_FAILED, STATUS_ERROR, STATUS_NEEDS_INPUT}
@@ -376,6 +379,59 @@ def claim_lease(run: Run, owner: str, seconds: int = LEASE_SECONDS) -> None:
 def release_lease(run: Run) -> None:
     run.lease_owner = None
     run.lease_expires_at = None
+
+
+def claim_submitted_reviews(db: Database, owner: str) -> list[tuple[str, dict[str, Any]]]:
+    """MCP elicitation으로 기록된 교사 결정을 집어 재개 payload로 돌려준다.
+
+    MCP 서버는 결정을 기록만 하고 run을 `review_submitted`로 넘긴다. 그래프 재개는 체크포인트·
+    리스·결과 반영을 모두 가진 웹 서버가 한다. 상태 전이(`review_submitted` → `running`)를
+    낙관적 잠금으로 하므로, 워커가 여럿이어도 같은 결정은 한 번만 재개된다.
+
+    payload는 웹 화면의 검토 요청과 같은 모양이다(`server.review`).
+    """
+    from sqlalchemy.orm.exc import StaleDataError
+
+    with db.session() as session:
+        run_ids = list(
+            session.scalars(select(Run.id).where(Run.status == STATUS_REVIEW_SUBMITTED)).all()
+        )
+
+    claimed: list[tuple[str, dict[str, Any]]] = []
+    for run_id in run_ids:
+        # run마다 트랜잭션을 나눈다. 하나가 경합에 지더라도 앞서 집은 run은 유지된다.
+        try:
+            with db.session() as session:
+                run = session.get(Run, run_id)
+                if run is None or run.status != STATUS_REVIEW_SUBMITTED:
+                    continue
+                entry = session.scalars(
+                    select(Review)
+                    .where(Review.run_id == run.id, Review.draft_hash == run.draft_hash)
+                    .order_by(Review.created_at.desc())
+                    .limit(1)
+                ).first()
+                if entry is None:
+                    continue
+                if entry.decision == "approve":
+                    payload: dict[str, Any] = {"approved": True, "edited_text": ""}
+                else:
+                    payload = {"approved": False, "reason": entry.reason or ""}
+                run.status = STATUS_RUNNING
+                claim_lease(run, owner)
+                session.flush()
+                record_audit(
+                    session,
+                    action="review.resumed_from_mcp",
+                    run_id=run.id,
+                    pseudonym=run.pseudonym,
+                    detail={"decision": entry.decision, "draft_hash": entry.draft_hash},
+                )
+        except StaleDataError:
+            # 다른 워커가 먼저 집었다.
+            continue
+        claimed.append((run_id, payload))
+    return claimed
 
 
 def recover_stale_runs(db: Database, owner: str, seconds: int = LEASE_SECONDS) -> list[str]:

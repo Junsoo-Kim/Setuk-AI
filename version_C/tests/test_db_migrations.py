@@ -204,6 +204,29 @@ class UpgradeHeadTests(unittest.TestCase):
             self.assertEqual(row[1], "done")
 
 
+class OptionalDependencyTests(unittest.TestCase):
+    """PostgreSQL 전용 의존성이 없어도 기본 SQLite 배포의 마이그레이션은 올라가야 한다.
+
+    `pgvector`는 requirements.txt에서 선택 의존성이다. 0006 마이그레이션이 파일 맨 위에서
+    `pgvector`를 import하면, 방언 검사로 SQLite를 건너뛰기도 전에 모듈 로딩 단계에서
+    ImportError가 나서 SQLite 배포의 `alembic upgrade head`가 항상 실패한다.
+    """
+
+    def test_upgrade_head_on_sqlite_without_pgvector_installed(self):
+        # sys.modules에 None을 넣으면 그 모듈의 import가 ImportError가 된다.
+        # pgvector가 설치된 개발 환경에서도 "설치 안 됨"을 재현하기 위함이다.
+        blocked = {"pgvector": None, "pgvector.sqlalchemy": None}
+        with _TempDatabase() as db, patch.dict(sys.modules, blocked):
+            command.upgrade(_alembic_config(db.path), "head")
+            engine = create_engine(db.url)
+            try:
+                tables = set(inspect(engine).get_table_names())
+            finally:
+                engine.dispose()
+        self.assertTrue(EXPECTED_TABLES <= tables)
+        self.assertNotIn("policy_chunks", tables)
+
+
 class OrmSchemaSyncTests(unittest.TestCase):
     """`db.py`의 ORM 모델과 마이그레이션이 실제로 만든 스키마가 일치하는지 확인한다.
 

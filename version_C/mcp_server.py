@@ -1,7 +1,9 @@
 """Setuk-AI MCP 서버 (stdio).
 
 Claude Code, Cline, Codex 같은 MCP 클라이언트가 이 서버를 붙이면 세특 작업에 필요한
-도구를 **타입이 정해진 호출**로만 쓸 수 있다. 자연어로 "학생정보 폴더에서 파일을 읽어"라고
+도구를 **타입이 정해진 호출**로만 쓸 수 있다. 참고 자료는 리소스로, 자주 쓰는 작업은
+프롬프트로 함께 연다(`mcp_resources.py`). 파이프라인 내부 에이전트도 같은 서버에 붙는다
+(`agent_tools.py`). 자연어로 "학생정보 폴더에서 파일을 읽어"라고
 지시하는 대신 `validate_student_yaml(student_key=...)`을 부르게 되고, 경로 조립과 권한
 판단은 전부 이 코드가 한다.
 
@@ -54,6 +56,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from .mcp_tools import (
+    HUMAN_GATED_TOOLS,
     ToolContext,
     ToolError,
     call_tool,
@@ -96,13 +99,18 @@ def _audit_sink(session_id: str):
     return record
 
 
-def build_server():
-    """MCP SDK 서버 인스턴스를 만든다."""
+def build_server(context: ToolContext | None = None):
+    """MCP SDK 서버 인스턴스를 만든다.
+
+    `context`를 주면 그 세션 상태(호출 상한·감사 로그 대상)를 쓴다. 파이프라인 내부
+    에이전트(`agent_tools.McpToolbox`)가 감사 로그를 자기 실행에 묶을 때 쓴다.
+    """
     from mcp.server import Server
     from mcp.types import TextContent, Tool
 
-    session_id = uuid.uuid4().hex[:12]
-    context = ToolContext(session_id=session_id, audit=_audit_sink(session_id))
+    if context is None:
+        session_id = uuid.uuid4().hex[:12]
+        context = ToolContext(session_id=session_id, audit=_audit_sink(session_id))
     # version을 넘기지 않으면 SDK 버전이 서버 버전으로 보고된다.
     server = Server(
         SERVER_NAME,
@@ -143,6 +151,11 @@ def build_server():
         MCP 사양상 그것이 **모델이 읽고 스스로 고칠 수 있는** 오류 보고 방식이다
         (프로토콜 오류로 올리면 모델에게 닿지 않는다).
         """
+        if name in HUMAN_GATED_TOOLS:
+            result = await _handle_human_gated(server, name, arguments or {}, context)
+            text = json.dumps(result, ensure_ascii=False, indent=1, default=str)
+            return [TextContent(type="text", text=text)], result
+
         timeout = tool_timeout_seconds()
         try:
             # 도구는 동기 함수다. 파일·DB I/O가 이벤트 루프를 막지 않도록 스레드로 보낸다.
@@ -162,7 +175,98 @@ def build_server():
         text = json.dumps(result, ensure_ascii=False, indent=1, default=str)
         return [TextContent(type="text", text=text)], result
 
+    _register_resources_and_prompts(server, context)
     return server
+
+
+async def _handle_human_gated(server, name: str, arguments: dict[str, Any], context: ToolContext):
+    """사람에게 직접 묻는 도구(`request_teacher_review`).
+
+    도구 타임아웃을 걸지 않는다 — 교사가 초안을 읽고 답하는 데 몇 분이 걸릴 수 있다.
+    호출 상한과 감사 로그는 다른 도구와 같다.
+    """
+    from . import mcp_tools
+    from .review_elicitation import request_teacher_review
+
+    context.charge(name)
+    run_id = arguments.get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip() or set(arguments) - {"run_id"}:
+        context.record(name, {"outcome": "error", "kind": "bad_arguments"})
+        raise ToolError("run_id 하나만 받습니다. 결정은 교사가 대화창에서 고릅니다.")
+
+    session = server.request_context.session
+    params = getattr(session, "client_params", None)
+    capabilities = getattr(params, "capabilities", None)
+    client_info = getattr(params, "clientInfo", None)
+
+    async def elicit(message: str, schema: dict[str, Any]):
+        return await session.elicit(message=message, requestedSchema=schema)
+
+    try:
+        result = await request_teacher_review(
+            run_id,
+            database=mcp_tools._default_database(),
+            elicit=elicit,
+            supports_elicitation=getattr(capabilities, "elicitation", None) is not None,
+            client_name=getattr(client_info, "name", None) or "unknown",
+        )
+    except ToolError:
+        context.record(name, {"outcome": "error", "kind": "ToolError"})
+        raise
+    context.record(
+        name, {"outcome": "ok", "recorded": result["recorded"], "elicitation": result["outcome"]}
+    )
+    return result
+
+
+def _register_resources_and_prompts(server, context: ToolContext) -> None:
+    """리소스·프롬프트 핸들러. 내용은 `mcp_resources.py`, 여기서는 정책과 배선만 한다.
+
+    리소스 읽기와 프롬프트 조회도 도구 호출과 같은 세션 상한(`context.charge`)과 감사
+    로그를 거친다. 감사 로그에는 URI나 인자 값이 아니라 종류·이름만 남긴다 — 프롬프트
+    인자에는 학생 초안이 들어온다.
+    """
+    from mcp.server.lowlevel.helper_types import ReadResourceContents
+    from mcp.types import GetPromptResult, Prompt, Resource, ResourceTemplate
+
+    from . import mcp_resources
+
+    @server.list_resources()
+    async def list_resources() -> list[Resource]:
+        items = await asyncio.to_thread(mcp_resources.list_resources)
+        return [Resource.model_validate(item) for item in items]
+
+    @server.list_resource_templates()
+    async def list_resource_templates() -> list[ResourceTemplate]:
+        return [ResourceTemplate.model_validate(item) for item in mcp_resources.list_resource_templates()]
+
+    @server.read_resource()
+    async def read_resource(uri) -> list[ReadResourceContents]:
+        kind = mcp_resources.resource_kind(uri)
+        context.charge("resource:read")
+        try:
+            text, mime = await asyncio.to_thread(mcp_resources.read_resource, uri)
+        except ToolError:
+            context.record("resource:read", {"outcome": "error", "kind": kind})
+            raise
+        context.record("resource:read", {"outcome": "ok", "kind": kind, "bytes": len(text.encode("utf-8"))})
+        return [ReadResourceContents(content=text, mime_type=mime)]
+
+    @server.list_prompts()
+    async def list_prompts() -> list[Prompt]:
+        return [Prompt.model_validate(item) for item in mcp_resources.list_prompts()]
+
+    @server.get_prompt()
+    async def get_prompt(name: str, arguments: dict[str, str] | None) -> GetPromptResult:
+        context.charge("prompt:get")
+        detail = {"prompt": name, "argument_keys": sorted((arguments or {}).keys())}
+        try:
+            result = await asyncio.to_thread(mcp_resources.get_prompt, name, arguments)
+        except ToolError:
+            context.record("prompt:get", {**detail, "outcome": "error"})
+            raise
+        context.record("prompt:get", {**detail, "outcome": "ok"})
+        return GetPromptResult.model_validate(result)
 
 
 async def main() -> None:

@@ -302,6 +302,7 @@ python -m version_C.mcp_server      # 저장소 루트에서
 | `get_run_status` | 읽기 | 작업 진행 상태(초안 본문·실명 미반환) |
 | `get_evidence_for_sentence` | 읽기 | 초안 문장 → 원본 사실 명제 역추적 |
 | `submit_review` | **쓰기** | 검토 결정 기록 — **기본 차단** |
+| `request_teacher_review` | **쓰기(사람 확인)** | 초안을 교사에게 직접 보여 주고 승인·반려를 묻는다(MCP elicitation) |
 
 ### 왜 MCP인가
 
@@ -337,11 +338,103 @@ B버전은 IDE 에이전트가 `AGENTS.md`를 읽고 **자연어 지시로 파�
 
 `submit_review`가 기본 차단인 이유: MCP 클라이언트는 대개 도구를 자동 승인하도록 설정할 수
 있다. 교사의 승인을 대신 기록하는 도구가 그렇게 자동 실행되면 **Human-in-the-Loop 자체가
-무의미해진다.** 이 서버는 그래프를 재개하지도 않는다 — 승인으로 파이프라인이 실제로
-진행되는 경로는 사람이 웹 화면에서 누르는 것 하나로 유지한다.
+무의미해진다.** 이 서버는 그래프를 재개하지도 않는다.
+
+### Elicitation으로 교사 검토 받기 (`request_teacher_review`)
+
+`submit_review`의 문제는 **모델이 `decision` 인자를 채운다**는 데 있다. `request_teacher_review`는
+인자가 `run_id` 하나뿐이다. 모델은 검토를 요청만 할 수 있고, 서버가 MCP `elicitation/create`로
+클라이언트에게 "이 초안을 사람에게 보여 주고 승인·반려를 물어 달라"고 한다(Claude Code
+v2.1.76+는 대화창으로 띄운다). 결정은 그 대화창에서 사람이 고른 값으로만 들어오므로, 모델이
+교사 대신 승인할 통로가 구조적으로 없다. 그래서 환경변수 허용 없이 열어 둔다.
+
+```
+모델 ─ tools/call request_teacher_review(run_id) ─▶ MCP 서버
+                                                    │ elicitation/create (초안 + 결정 양식)
+교사 ◀──────────── 클라이언트 대화창 ◀────────────────┘
+  └─ 승인/반려(+사유) ─▶ MCP 서버: 다시 읽어 초안·상태 불변 확인 → Review 기록, run=review_submitted
+                                                    │
+웹 서버 워커(5초 주기) ─ claim_submitted_reviews ─▶ 그래프 resume (평가·Linter·저장)
+```
+
+- **fail-closed**: elicitation을 지원하지 않는 클라이언트는 거부하고 웹 화면으로 안내한다.
+- **오래된 승인 차단**: 대화창이 열려 있는 사이 웹에서 먼저 처리했거나 초안이 재생성됐으면
+  기록하지 않는다(웹 화면의 Draft Hash 검사와 같은 원리).
+- **반려에는 사유 필수**, 거절·취소는 아무것도 기록하지 않고 감사 로그만 남긴다.
+- **결정 채널과 실행 주체 분리**: MCP 서버는 결정만 기록하고, 체크포인트·리스·결과 반영을 가진
+  웹 서버가 재개한다. 상태 전이가 낙관적 잠금이라 같은 결정은 한 번만 재개된다. 웹 서버가
+  꺼져 있었다면 다음 기동 때 이어서 진행한다.
+- **기록**: 웹 화면 승인과 같은 `Review` 행·감사 로그를 쓰되, 검토자를
+  `mcp-elicitation:<클라이언트 이름>`으로 남겨 채널을 구분한다. 도구 결과(모델이 보는 것)에는
+  초안 본문을 싣지 않는다.
+- **본문 수정 후 승인**은 지원하지 않는다. 고쳐서 승인하려면 웹 화면을 쓴다.
+- **신뢰 경계**: elicitation 응답은 클라이언트가 보낸다. 클라이언트 쪽 설정(예: Claude Code의
+  Elicitation hook)으로 응답을 자동으로 채울 수도 있는데, 이는 교사 본인의 도구 설정이라 서버가
+  막을 수 없다. 대신 채널과 클라이언트 이름을 감사 로그에 남긴다.
+- 파이프라인 내부 에이전트(`agent_tools.STAGE_TOOLS`)에는 이 도구를 주지 않는다.
 
 MCP 사양도 신뢰된 서버가 아니면 tool annotation을 믿지 말라고 명시한다. 이 서버의
 `readOnlyHint`도 힌트일 뿐이고, 실제 강제는 `call_tool`의 정책 검사가 한다.
+
+### 리소스와 프롬프트
+
+도구만 있는 것이 아니다. MCP의 나머지 두 기본 요소도 연다(`mcp_resources.py`).
+
+**리소스** — 클라이언트가 읽어 맥락에 넣는 참고 자료. Claude Code에서는 `@setuk:`로 멘션한다.
+
+| URI | 내용 |
+| --- | --- |
+| `setuk://rules/neis` | Linter 규칙(`version_B/rules.json` 원본) |
+| `setuk://instructions/<파일명>` | 파이프라인이 시스템 프롬프트로 쓰는 단계별 지침(B버전 원본, 설명에 `prompt_version` 표시) |
+| `setuk://policy/{chunk_id}` | 기재요령 조항 전문과 인용 정보(템플릿으로도 공개) |
+
+학생 데이터는 리소스로 열지 않는다. 리소스는 클라이언트가 사용자 확인 없이 맥락에 붙일 수
+있으므로, 학생 자료 접근은 경로 제한과 감사 로그가 걸린 도구로만 한다. 지침 리소스는 허용
+목록에 있는 파일명만 읽어 경로 조작이 불가능하다.
+
+**프롬프트** — 사용자가 골라 실행하는 작업 템플릿. Claude Code에서는 슬래시 명령이 된다.
+
+| 프롬프트 | 하는 일 |
+| --- | --- |
+| `/mcp__setuk__review_draft` | 초안을 `lint_record`·`search_school_policy`로 검토하고 문제마다 근거 조항을 단다(규칙 리소스 내장) |
+| `/mcp__setuk__check_policy` | "토익 점수 써도 되나?" 같은 질문에 근거 조항으로만 답한다 |
+| `/mcp__setuk__draft_from_facts` | 파이프라인과 같은 초안 지침(리소스 내장)으로 STRUCTURED_FACTS_V1에서 초안을 쓴다 |
+
+프롬프트에 넣은 본문(초안·사실 장부)은 untrusted 경계로 감싸진다. 리소스 읽기와 프롬프트
+조회도 도구 호출과 같은 세션 상한과 감사 로그(`resource:read`·`prompt:get`, 종류·이름만
+기록)를 거친다.
+
+### 파이프라인 에이전트도 같은 MCP 서버를 쓴다
+
+외부 IDE만 MCP를 쓰는 것이 아니다. 초안(`draft`)·평가(`evaluate`)·수정(`fix`) 단계의
+에이전트는 `agent_tools.McpToolbox`로 **같은 MCP 서버에 MCP 클라이언트로 붙어** 작업 중에
+도구를 스스로 고른다 — 규정이 애매하면 `search_school_policy`로 근거 조항을 찾고, 제출 전에
+`lint_record`로 자기 초안을 검사한다. 도구 목록은 `tools/list`, 실행은 `tools/call`로 받으므로
+경로 제한·호출 상한·결과 크기 제한·타임아웃이 외부 클라이언트와 똑같이 적용된다.
+
+```
+LangGraph 노드 ─ llm.call_agent (tool-use 루프) ─ Claude API
+                      │ tool_use / tool_result
+                      ▼
+              McpToolbox (MCP 클라이언트) ─ 인메모리 JSON-RPC ─ Setuk MCP 서버(build_server)
+                                                                 ▲
+                                          Claude Code / Cline ─ stdio ┘
+```
+
+- **전송**: Messages API의 MCP 커넥터는 원격(URL) 서버만 받는다. 이 서버는 학생 데이터가 있는
+  로컬 프로세스여야 하므로 같은 프로세스에 띄우고 인메모리 스트림으로 연결한다(핸드셰이크와
+  메시지는 stdio와 같다).
+- **단계별 최소 권한** (`agent_tools.STAGE_TOOLS`): 허용되지 않은 도구는 모델에게 보이지 않고,
+  이름을 지어내 불러도 서버에 닿기 전에 `is_error` 결과로 거부된다. 실명이 든 원본을 돌려주는
+  `extract_docx`·`validate_student_yaml`은 파이프라인의 가명화를 우회하므로 어떤 단계에도 주지
+  않는다. `submit_review`도 주지 않는다.
+- **루프 상한** (`llm.MAX_TOOL_ROUNDS` = 6): 넘으면 `tool_choice: none`으로 도구를 끄고 답을 받는다.
+- **서버 안내문**: MCP initialize 결과의 `instructions`가 에이전트 시스템 프롬프트에 덧붙는다.
+- **기록**: 단계별 `metrics[].tool_calls`에 도구 이름과 실패 여부만 남는다(인자는 남기지 않음).
+- **끄기**: `SETUK_AGENT_TOOLS=0`이면 도구 없이 단계마다 한 번 호출하던 이전 방식으로 돌아간다.
+
+구조화(`structure`) 단계에는 도구를 주지 않는다. 그 단계는 원본 학생 자료를 사실 명제로 옮기는
+일이라 외부 근거가 필요 없고, 도구가 있으면 원본 밖의 내용이 섞일 여지만 생긴다.
 
 ## 보존 기간과 학생별 삭제
 
