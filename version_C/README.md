@@ -343,6 +343,34 @@ B버전은 IDE 에이전트가 `AGENTS.md`를 읽고 **자연어 지시로 파�
 MCP 사양도 신뢰된 서버가 아니면 tool annotation을 믿지 말라고 명시한다. 이 서버의
 `readOnlyHint`도 힌트일 뿐이고, 실제 강제는 `call_tool`의 정책 검사가 한다.
 
+### 리소스와 프롬프트
+
+도구만 있는 것이 아니다. MCP의 나머지 두 기본 요소도 연다(`mcp_resources.py`).
+
+**리소스** — 클라이언트가 읽어 맥락에 넣는 참고 자료. Claude Code에서는 `@setuk:`로 멘션한다.
+
+| URI | 내용 |
+| --- | --- |
+| `setuk://rules/neis` | Linter 규칙(`version_B/rules.json` 원본) |
+| `setuk://instructions/<파일명>` | 파이프라인이 시스템 프롬프트로 쓰는 단계별 지침(B버전 원본, 설명에 `prompt_version` 표시) |
+| `setuk://policy/{chunk_id}` | 기재요령 조항 전문과 인용 정보(템플릿으로도 공개) |
+
+학생 데이터는 리소스로 열지 않는다. 리소스는 클라이언트가 사용자 확인 없이 맥락에 붙일 수
+있으므로, 학생 자료 접근은 경로 제한과 감사 로그가 걸린 도구로만 한다. 지침 리소스는 허용
+목록에 있는 파일명만 읽어 경로 조작이 불가능하다.
+
+**프롬프트** — 사용자가 골라 실행하는 작업 템플릿. Claude Code에서는 슬래시 명령이 된다.
+
+| 프롬프트 | 하는 일 |
+| --- | --- |
+| `/mcp__setuk__review_draft` | 초안을 `lint_record`·`search_school_policy`로 검토하고 문제마다 근거 조항을 단다(규칙 리소스 내장) |
+| `/mcp__setuk__check_policy` | "토익 점수 써도 되나?" 같은 질문에 근거 조항으로만 답한다 |
+| `/mcp__setuk__draft_from_facts` | 파이프라인과 같은 초안 지침(리소스 내장)으로 STRUCTURED_FACTS_V1에서 초안을 쓴다 |
+
+프롬프트에 넣은 본문(초안·사실 장부)은 untrusted 경계로 감싸진다. 리소스 읽기와 프롬프트
+조회도 도구 호출과 같은 세션 상한과 감사 로그(`resource:read`·`prompt:get`, 종류·이름만
+기록)를 거친다.
+
 ### 파이프라인 에이전트도 같은 MCP 서버를 쓴다
 
 외부 IDE만 MCP를 쓰는 것이 아니다. 초안(`draft`)·평가(`evaluate`)·수정(`fix`) 단계의

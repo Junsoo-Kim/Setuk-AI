@@ -1,7 +1,9 @@
 """Setuk-AI MCP 서버 (stdio).
 
 Claude Code, Cline, Codex 같은 MCP 클라이언트가 이 서버를 붙이면 세특 작업에 필요한
-도구를 **타입이 정해진 호출**로만 쓸 수 있다. 자연어로 "학생정보 폴더에서 파일을 읽어"라고
+도구를 **타입이 정해진 호출**로만 쓸 수 있다. 참고 자료는 리소스로, 자주 쓰는 작업은
+프롬프트로 함께 연다(`mcp_resources.py`). 파이프라인 내부 에이전트도 같은 서버에 붙는다
+(`agent_tools.py`). 자연어로 "학생정보 폴더에서 파일을 읽어"라고
 지시하는 대신 `validate_student_yaml(student_key=...)`을 부르게 되고, 경로 조립과 권한
 판단은 전부 이 코드가 한다.
 
@@ -167,7 +169,58 @@ def build_server(context: ToolContext | None = None):
         text = json.dumps(result, ensure_ascii=False, indent=1, default=str)
         return [TextContent(type="text", text=text)], result
 
+    _register_resources_and_prompts(server, context)
     return server
+
+
+def _register_resources_and_prompts(server, context: ToolContext) -> None:
+    """리소스·프롬프트 핸들러. 내용은 `mcp_resources.py`, 여기서는 정책과 배선만 한다.
+
+    리소스 읽기와 프롬프트 조회도 도구 호출과 같은 세션 상한(`context.charge`)과 감사
+    로그를 거친다. 감사 로그에는 URI나 인자 값이 아니라 종류·이름만 남긴다 — 프롬프트
+    인자에는 학생 초안이 들어온다.
+    """
+    from mcp.server.lowlevel.helper_types import ReadResourceContents
+    from mcp.types import GetPromptResult, Prompt, Resource, ResourceTemplate
+
+    from . import mcp_resources
+
+    @server.list_resources()
+    async def list_resources() -> list[Resource]:
+        items = await asyncio.to_thread(mcp_resources.list_resources)
+        return [Resource.model_validate(item) for item in items]
+
+    @server.list_resource_templates()
+    async def list_resource_templates() -> list[ResourceTemplate]:
+        return [ResourceTemplate.model_validate(item) for item in mcp_resources.list_resource_templates()]
+
+    @server.read_resource()
+    async def read_resource(uri) -> list[ReadResourceContents]:
+        kind = mcp_resources.resource_kind(uri)
+        context.charge("resource:read")
+        try:
+            text, mime = await asyncio.to_thread(mcp_resources.read_resource, uri)
+        except ToolError:
+            context.record("resource:read", {"outcome": "error", "kind": kind})
+            raise
+        context.record("resource:read", {"outcome": "ok", "kind": kind, "bytes": len(text.encode("utf-8"))})
+        return [ReadResourceContents(content=text, mime_type=mime)]
+
+    @server.list_prompts()
+    async def list_prompts() -> list[Prompt]:
+        return [Prompt.model_validate(item) for item in mcp_resources.list_prompts()]
+
+    @server.get_prompt()
+    async def get_prompt(name: str, arguments: dict[str, str] | None) -> GetPromptResult:
+        context.charge("prompt:get")
+        detail = {"prompt": name, "argument_keys": sorted((arguments or {}).keys())}
+        try:
+            result = await asyncio.to_thread(mcp_resources.get_prompt, name, arguments)
+        except ToolError:
+            context.record("prompt:get", {**detail, "outcome": "error"})
+            raise
+        context.record("prompt:get", {**detail, "outcome": "ok"})
+        return GetPromptResult.model_validate(result)
 
 
 async def main() -> None:
