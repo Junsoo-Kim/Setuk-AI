@@ -19,7 +19,6 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
-from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import TSVECTOR
 
 revision: str = "0006"
@@ -37,6 +36,11 @@ def upgrade() -> None:
     # 배포에서는 어떤 리비전도 head까지 올라갈 수 없었다.
     if op.get_bind().dialect.name != "postgresql":
         return
+    # pgvector는 선택 의존성이다(requirements.txt). 모듈 맨 위에서 import하면 alembic이
+    # 리비전 파일을 읽는 순간 ImportError가 나서, 위의 방언 검사에 닿기도 전에 SQLite
+    # 배포의 upgrade가 실패한다. PostgreSQL일 때만 필요하므로 여기서 import한다.
+    from pgvector.sqlalchemy import Vector
+
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     op.create_table(
         "policy_chunks",
